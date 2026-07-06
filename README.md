@@ -1,5 +1,8 @@
 # Ticket Bridge
 
+[![Tests](https://github.com/alexsantos/ticket-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/alexsantos/ticket-bridge/actions/workflows/tests.yml)
+[![Docker image](https://github.com/alexsantos/ticket-bridge/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/alexsantos/ticket-bridge/pkgs/container/ticket-bridge)
+
 Lightweight ticket correlation service across multiple support applications,
 designed to replace the "central hub" role that OSTicket used to play
 implicitly when two (or more) teams used the same tool to track processes
@@ -332,7 +335,35 @@ as the only barrier.
 
 ---
 
-## 7. Suggested next steps (out of scope for this skeleton)
+## 7. Continuous Integration / Continuous Delivery
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+- **`tests.yml`** — runs `uv run pytest tests/ -v` on every push to `main`
+  and on every pull request targeting `main`. This is the "Tests" badge at
+  the top of this file.
+- **`docker-publish.yml`** — on every push to `main` (and on tags matching
+  `v*.*.*`), runs the test suite again as a gate, then builds the image
+  from the `Dockerfile` and pushes it to the
+  [GitHub Container Registry](https://github.com/alexsantos/ticket-bridge/pkgs/container/ticket-bridge)
+  (`ghcr.io/alexsantos/ticket-bridge`). Pushes to `main` are tagged
+  `latest` and with the commit SHA; version tags additionally get a
+  semver tag. This is the "Docker image" badge at the top of this file.
+
+Both workflows authenticate with the repository's built-in `GITHUB_TOKEN` -
+no extra secrets need to be configured. The GHCR package's visibility
+(public/private) is managed from the repository's **Packages** settings on
+GitHub, independently of these workflows.
+
+To deploy a published image to Cloud Run instead of building it locally
+(see section 4.5), point `gcloud run deploy` at
+`--image=ghcr.io/alexsantos/ticket-bridge:latest`; Cloud Run can pull from
+GHCR directly if the package is public, or via a registry credential if
+it's kept private.
+
+---
+
+## 8. Suggested next steps (out of scope for this skeleton)
 
 - Human authentication for the frontend (IAP).
 - Alerts (e.g. Telegram, similar to other internal projects) when outbox
