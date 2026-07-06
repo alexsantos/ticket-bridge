@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<!--
+    index.html
+    ----------
+    Frontend estático (HTML + JS vanilla, sem build step) de configuração
+    e auditoria do Ticket Bridge. Propositadamente simples: este projeto
+    é um serviço de integração interno, não uma aplicação de utilizador
+    final, por isso não se justifica um framework/bundler.
+
+    Três separadores:
+      - Sistemas: listar/criar/editar sistemas federados.
+      - Conversas: consultar conversas e o estado de cada participante.
+      - Auditoria: consultar o registo de eventos (audit_log).
+-->
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Bridge — Configuração e Auditoria</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header>
+        <h1>Ticket Bridge</h1>
+        <p class="subtitle">Correlação de tickets entre sistemas de suporte</p>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab-btn active" data-tab="sistemas">Sistemas</button>
+        <button class="tab-btn" data-tab="conversas">Conversas</button>
+        <button class="tab-btn" data-tab="auditoria">Auditoria</button>
+    </nav>
+
+    <main>
+        <!-- ================= SISTEMAS ================= -->
+        <section id="tab-sistemas" class="tab-panel active">
+            <div class="panel-header">
+                <h2>Sistemas Federados</h2>
+                <button id="btn-novo-sistema" class="btn-primary">+ Novo sistema</button>
+            </div>
+            <table id="tabela-sistemas">
+                <thead>
+                    <tr>
+                        <th>Código</th><th>Nome</th><th>URL Base</th>
+                        <th>Auth</th><th>Ativo</th><th>Atualizado</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <dialog id="dialog-sistema">
+                <form id="form-sistema" method="dialog">
+                    <h3>Configuração do sistema</h3>
+                    <label>Código (imutável após criação)
+                        <input type="text" name="codigo" required placeholder="ex: sistema_c">
+                    </label>
+                    <label>Nome
+                        <input type="text" name="nome" required placeholder="ex: Helpdesk Equipa X">
+                    </label>
+                    <label>URL Base (endpoint de webhook do sistema)
+                        <input type="url" name="base_url" required placeholder="https://.../webhook">
+                    </label>
+                    <label>Tipo de autenticação
+                        <select name="auth_type">
+                            <option value="api_key">API Key (header)</option>
+                            <option value="bearer">Bearer Token</option>
+                            <option value="basic">Basic Auth</option>
+                        </select>
+                    </label>
+                    <label>Referência do segredo (nome no Secret Manager / var. de ambiente)
+                        <input type="text" name="secret_ref" placeholder="ex: sistema_c_outbound_key">
+                    </label>
+                    <label>Mapeamento de estados (JSON: interno → externo)
+                        <textarea name="status_mapping" rows="5" placeholder='{"novo": "Open", "resolvido": "Resolved"}'></textarea>
+                    </label>
+                    <label>Template de payload (JSON, com {ref_externa}, {status_mapeado}, {conversation_id})
+                        <textarea name="payload_template" rows="4" placeholder='{"id": "{ref_externa}", "status": "{status_mapeado}"}'></textarea>
+                    </label>
+                    <label class="checkbox">
+                        <input type="checkbox" name="active" checked> Ativo
+                    </label>
+                    <div class="dialog-actions">
+                        <button type="button" id="btn-cancelar-sistema">Cancelar</button>
+                        <button type="submit" class="btn-primary">Guardar</button>
+                    </div>
+                </form>
+            </dialog>
+        </section>
+
+        <!-- ================= CONVERSAS ================= -->
+        <section id="tab-conversas" class="tab-panel">
+            <div class="panel-header">
+                <h2>Conversas</h2>
+                <label>Filtrar por sistema:
+                    <select id="filtro-conversas-sistema">
+                        <option value="">Todos</option>
+                    </select>
+                </label>
+            </div>
+            <table id="tabela-conversas">
+                <thead>
+                    <tr>
+                        <th>ID</th><th>Assunto</th><th>Estado geral</th>
+                        <th>Participantes</th><th>Atualizado</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+
+        <!-- ================= AUDITORIA ================= -->
+        <section id="tab-auditoria" class="tab-panel">
+            <div class="panel-header">
+                <h2>Registo de Auditoria</h2>
+                <label>Filtrar por sistema:
+                    <select id="filtro-auditoria-sistema">
+                        <option value="">Todos</option>
+                    </select>
+                </label>
+            </div>
+            <table id="tabela-auditoria">
+                <thead>
+                    <tr>
+                        <th>Data/Hora</th><th>Tipo de evento</th><th>Sistema</th>
+                        <th>Conversa</th><th>Detalhe</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </section>
+    </main>
+
+    <footer>
+        <span id="status-conexao"></span>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>
