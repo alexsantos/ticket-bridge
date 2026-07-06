@@ -76,7 +76,9 @@ ticket-bridge/
 │   └── 002_seed_example.sql     # sample data (development only)
 ├── tests/
 │   └── test_status_mapper.py
-├── requirements.txt
+├── pyproject.toml               # project metadata and dependencies (uv)
+├── uv.lock                      # pinned, reproducible dependency versions
+├── .python-version              # Python version pinned for uv
 ├── Dockerfile
 ├── .env.example
 ├── CLAUDE.md                    # architecture rationale
@@ -91,20 +93,22 @@ start there when exploring the code in PyCharm.
 ## 3. Running locally (development)
 
 ### 3.1. Prerequisites
-- Python 3.12+
+- [uv](https://github.com/astral-sh/uv) (manages the Python version, the
+  virtual environment, and dependencies - no separate Python install needed)
 - Local PostgreSQL 15+ (or via Docker)
-- PyCharm (open the `ticket-bridge/` folder as a project; mark `app` as
-  "Sources Root" if needed)
+- PyCharm (open the `ticket-bridge/` folder as a project; point the
+  interpreter at `.venv` created by `uv sync`, and mark `app` as "Sources
+  Root" if needed)
 
 ### 3.2. Steps
 
 ```bash
-# 1. Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+# 1. Install uv, if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Install dependencies
-pip install -r requirements.txt
+# 2. Install dependencies (uv creates .venv and installs the pinned
+#    versions from uv.lock automatically)
+uv sync
 
 # 3. Create the local database
 createdb ticketbridge
@@ -118,7 +122,7 @@ cp .env.example .env
 # edit .env with your local DB credentials
 
 # 6. Start the server
-uvicorn app.main:app --reload --port 8080
+uv run uvicorn app.main:app --reload --port 8080
 ```
 
 Access:
@@ -142,7 +146,7 @@ curl -X POST http://localhost:8080/api/v1/events \
 
 To run the automated tests:
 ```bash
-pytest tests/ -v
+uv run pytest tests/ -v
 ```
 
 ---
