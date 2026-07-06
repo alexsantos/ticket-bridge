@@ -3,8 +3,9 @@
 --
 -- Initial Ticket Bridge migration.
 -- Creates the data model that supports correlation across N systems
--- (fan-out), the outbox pattern for asynchronous delivery, and full event
--- auditing.
+-- (fan-out), mandatory ticket categorization via topics and per-system
+-- subscriptions, the outbox pattern for asynchronous delivery, and full
+-- event auditing.
 --
 -- Run with: psql "$DATABASE_URL" -f migrations/001_initial_schema.sql
 -- =============================================================================
@@ -37,6 +38,43 @@ CREATE TABLE systems (
 COMMENT ON TABLE systems IS 'External systems federated through the bridge (replacing the central OSTicket).';
 
 -- -----------------------------------------------------------------------------
+-- topics
+--
+-- Ticket categories/queues (e.g. INFRA, SPM, SALES) that every conversation
+-- must declare on creation, and that systems subscribe to. This is what
+-- drives fan-out: a system receives a ticket (and its updates) if and only
+-- if it is subscribed to that ticket's topic - see
+-- system_topic_subscriptions below and
+-- correlation_service.list_fanout_destinations.
+-- -----------------------------------------------------------------------------
+CREATE TABLE topics (
+    code            TEXT PRIMARY KEY,               -- short identifier, e.g. 'INFRA'
+    name            TEXT NOT NULL,                   -- human-readable name, e.g. 'Infrastructure'
+    description     TEXT,
+    active          BOOLEAN NOT NULL DEFAULT TRUE,   -- gates whether new conversations may choose this topic
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE topics IS 'Ticket categories/queues (e.g. INFRA, SPM, SALES) that systems subscribe to.';
+
+-- -----------------------------------------------------------------------------
+-- system_topic_subscriptions
+--
+-- Associative table (system <-> topic). A system only receives fan-out for
+-- topics it is subscribed to; unsubscribing takes effect immediately for
+-- any future event, even on conversations it already participates in.
+-- -----------------------------------------------------------------------------
+CREATE TABLE system_topic_subscriptions (
+    system_code     TEXT NOT NULL REFERENCES systems(code) ON DELETE CASCADE,
+    topic_code      TEXT NOT NULL REFERENCES topics(code) ON DELETE CASCADE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (system_code, topic_code)
+);
+
+CREATE INDEX idx_subscriptions_topic ON system_topic_subscriptions(topic_code);
+
+-- -----------------------------------------------------------------------------
 -- api_keys
 --
 -- Inbound keys: used to authenticate calls that EACH system makes to the
@@ -63,21 +101,26 @@ CREATE INDEX idx_api_keys_system_code ON api_keys(system_code) WHERE active = TR
 -- -----------------------------------------------------------------------------
 CREATE TABLE conversations (
     conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    subject         TEXT,
+    subject         TEXT,                             -- free-text ticket title, e.g. 'Lab printer malfunction'
+    topic_code      TEXT NOT NULL REFERENCES topics(code),  -- category/queue, immutable after creation
     overall_status  TEXT NOT NULL DEFAULT 'open',    -- aggregated internal state (common vocabulary)
     metadata        JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX idx_conversations_topic_code ON conversations(topic_code);
+
 -- -----------------------------------------------------------------------------
 -- conversation_participants
 --
 -- Links a conversation to each system involved and stores the external
 -- reference (the ticket ID in that system) and the last known status in
--- that system. This table is what allows fan-out to N systems instead of a
--- fixed A<->B pair: notifying everyone interested in a change is just
--- SELECT system_code FROM conversation_participants WHERE conversation_id = ...
+-- that system. A row only exists once that system has itself reported an
+-- event for this conversation. Fan-out destinations are NOT read from this
+-- table (see system_topic_subscriptions) - it is only used to know, per
+-- destination, whether they already have a ticket linked (so the outbound
+-- payload can distinguish "update your ticket" from "please open one").
 -- -----------------------------------------------------------------------------
 CREATE TABLE conversation_participants (
     conversation_id UUID NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
@@ -149,6 +192,10 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_systems_updated_at
     BEFORE UPDATE ON systems
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_topics_updated_at
+    BEFORE UPDATE ON topics
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER trg_conversations_updated_at

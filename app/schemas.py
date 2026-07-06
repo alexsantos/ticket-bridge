@@ -29,11 +29,17 @@ class IncomingEvent(BaseModel):
     )
     external_ref: str = Field(description="Ticket ID in the source system.")
     status: str = Field(description="Status in the source system's vocabulary.")
-    subject: str | None = None
+    subject: str | None = Field(default=None, description="Free-text ticket title.")
+    topic_code: str | None = Field(
+        default=None,
+        description="Ticket category/queue (e.g. 'INFRA'). Required when creating a "
+                    "new conversation; the source system must be subscribed to it. "
+                    "Immutable once the conversation exists.",
+    )
     recipients: list[str] | None = Field(
         default=None,
         description="Codes of the systems to notify. If omitted, notifies "
-                     "every other participant already associated with the conversation.",
+                     "every system currently subscribed to the conversation's topic.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -65,6 +71,9 @@ class SystemCreate(BaseModel):
     status_mapping: dict[str, str] = Field(default_factory=dict)
     payload_template: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
+    topics: list[str] = Field(
+        default_factory=list, description="Topic codes this system subscribes to."
+    )
 
 
 class SystemUpdate(BaseModel):
@@ -75,6 +84,7 @@ class SystemUpdate(BaseModel):
     status_mapping: dict[str, str] | None = None
     payload_template: dict[str, Any] | None = None
     active: bool | None = None
+    topics: list[str] | None = None
 
 
 class SystemOut(BaseModel):
@@ -84,10 +94,36 @@ class SystemOut(BaseModel):
     auth_type: str
     status_mapping: dict[str, str]
     active: bool
+    topics: list[str]
     created_at: datetime
     updated_at: datetime
     # auth_config intentionally omitted from the default output - it may
     # contain references to secrets. See dedicated endpoint if needed.
+
+
+# ---------------------------------------------------------------------------
+# Topic configuration (CRUD /api/v1/topics)
+# ---------------------------------------------------------------------------
+class TopicCreate(BaseModel):
+    code: str
+    name: str
+    description: str | None = None
+    active: bool = True
+
+
+class TopicUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    active: bool | None = None
+
+
+class TopicOut(BaseModel):
+    code: str
+    name: str
+    description: str | None
+    active: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +139,7 @@ class ParticipantOut(BaseModel):
 class ConversationOut(BaseModel):
     conversation_id: UUID
     subject: str | None
+    topic_code: str
     overall_status: str
     created_at: datetime
     updated_at: datetime

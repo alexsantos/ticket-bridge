@@ -19,31 +19,38 @@ router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 async def list_conversations(
     limit: int = Query(default=50, le=200),
     system_code: str | None = None,
+    topic_code: str | None = None,
 ) -> list[ConversationOut]:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
+            select_prefix = "SELECT"
+            join_clause = ""
+            filters = []
+            params: dict = {"limit": limit}
+
             if system_code:
-                await cur.execute(
-                    """
-                    SELECT DISTINCT c.conversation_id, c.subject, c.overall_status, c.created_at, c.updated_at
-                    FROM conversations c
-                    JOIN conversation_participants p ON p.conversation_id = c.conversation_id
-                    WHERE p.system_code = %(system_code)s
-                    ORDER BY c.updated_at DESC
-                    LIMIT %(limit)s
-                    """,
-                    {"system_code": system_code, "limit": limit},
-                )
-            else:
-                await cur.execute(
-                    """
-                    SELECT conversation_id, subject, overall_status, created_at, updated_at
-                    FROM conversations
-                    ORDER BY updated_at DESC
-                    LIMIT %(limit)s
-                    """,
-                    {"limit": limit},
-                )
+                select_prefix = "SELECT DISTINCT"
+                join_clause = "JOIN conversation_participants p ON p.conversation_id = c.conversation_id"
+                filters.append("p.system_code = %(system_code)s")
+                params["system_code"] = system_code
+            if topic_code:
+                filters.append("c.topic_code = %(topic_code)s")
+                params["topic_code"] = topic_code
+
+            where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+            await cur.execute(
+                f"""
+                {select_prefix} c.conversation_id, c.subject, c.topic_code, c.overall_status,
+                       c.created_at, c.updated_at
+                FROM conversations c
+                {join_clause}
+                {where_clause}
+                ORDER BY c.updated_at DESC
+                LIMIT %(limit)s
+                """,
+                params,
+            )
             conversations = await cur.fetchall()
 
         result = []
@@ -59,7 +66,7 @@ async def get_conversation(conversation_id: UUID) -> ConversationOut:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT conversation_id, subject, overall_status, created_at, updated_at
+                SELECT conversation_id, subject, topic_code, overall_status, created_at, updated_at
                 FROM conversations WHERE conversation_id = %(id)s
                 """,
                 {"id": conversation_id},

@@ -133,6 +133,23 @@ form input, form select, form textarea {
     font-family: inherit;
 }
 form label.checkbox { flex-direction: row; align-items: center; gap: 0.5rem; }
+form input[type="checkbox"] { width: auto; padding: 0; border: none; }
+
+fieldset {
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 0.6rem 0.8rem;
+    margin: 0;
+}
+fieldset legend { font-size: 0.85rem; color: #4b5563; padding: 0 0.3rem; }
+
+#system-topics-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    max-height: 8rem;
+    overflow-y: auto;
+}
 
 .dialog-actions {
     display: flex;

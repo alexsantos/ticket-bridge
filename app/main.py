@@ -22,7 +22,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import audit, conversations, events, sync, systems
+from app.api import audit, conversations, events, sync, systems, topics
 from app.config import get_settings
 from app.database import close_pool, init_pool
 
@@ -50,6 +50,7 @@ app = FastAPI(
 app.include_router(events.router)
 app.include_router(sync.router)
 app.include_router(systems.router)
+app.include_router(topics.router)
 app.include_router(conversations.router)
 app.include_router(audit.router)
 

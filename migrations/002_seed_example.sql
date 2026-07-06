@@ -2,11 +2,19 @@
 -- 002_seed_example.sql
 --
 -- Sample data, useful only in a development/test environment.
--- DO NOT run in production. Creates two fictitious systems to allow testing
--- the end-to-end flow locally before configuring the real systems.
+-- DO NOT run in production. Creates two fictitious systems, three example
+-- topics, and their subscriptions, to allow testing the end-to-end flow
+-- (including proactive fan-out to a topic's subscribers) locally before
+-- configuring the real systems.
 -- =============================================================================
 
 BEGIN;
+
+INSERT INTO topics (code, name, description)
+VALUES
+    ('INFRA', 'Infrastructure', 'Network, servers, and workstation issues'),
+    ('SPM', 'Service & Project Management', 'Project coordination and service requests'),
+    ('SALES', 'Sales', 'Sales team requests and customer escalations');
 
 INSERT INTO systems (code, name, base_url, auth_type, auth_config, status_mapping, payload_template, active)
 VALUES
@@ -23,7 +31,21 @@ VALUES
         "resolved": "Resolved",
         "closed": "Closed"
     }',
-    '{"ticket_ref": "{external_ref}", "status": "{mapped_status}", "conversation_id": "{conversation_id}"}',
+    '{
+        "on_create": {
+            "action": "create_ticket",
+            "source_ref": "{source_ref}",
+            "source_system": "{source_system}",
+            "status": "{mapped_status}",
+            "conversation_id": "{conversation_id}"
+        },
+        "on_update": {
+            "action": "update_ticket",
+            "ticket_ref": "{external_ref}",
+            "status": "{mapped_status}",
+            "conversation_id": "{conversation_id}"
+        }
+    }',
     TRUE
 ),
 (
@@ -39,15 +61,38 @@ VALUES
         "resolved": "RESOLVED",
         "closed": "CLOSED"
     }',
-    '{"incident_id": "{external_ref}", "status": "{mapped_status}", "correlation": "{conversation_id}"}',
+    '{
+        "on_create": {
+            "action": "CREATE",
+            "source_ref": "{source_ref}",
+            "source_system": "{source_system}",
+            "status": "{mapped_status}",
+            "correlation": "{conversation_id}"
+        },
+        "on_update": {
+            "action": "UPDATE",
+            "incident_id": "{external_ref}",
+            "status": "{mapped_status}",
+            "correlation": "{conversation_id}"
+        }
+    }',
     TRUE
 );
+
+-- system_a subscribes only to INFRA; system_b subscribes to INFRA and SPM.
+-- This means creating an INFRA ticket as system_a immediately fans out to
+-- system_b (it's subscribed), while a SALES ticket would reach neither.
+INSERT INTO system_topic_subscriptions (system_code, topic_code)
+VALUES
+    ('system_a', 'INFRA'),
+    ('system_b', 'INFRA'),
+    ('system_b', 'SPM');
 
 -- Sample inbound keys (SHA-256 hash of "dev-key-system-a" / "dev-key-system-b").
 -- Generate real keys with: python -c "import secrets,hashlib; k=secrets.token_urlsafe(32); print(k, hashlib.sha256(k.encode()).hexdigest())"
 INSERT INTO api_keys (system_code, key_hash, description)
 VALUES
-('system_a', 'a3f1c9e4d2b5f6a8c7e9b1d3f5a7c9e1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3', 'Development key - DO NOT USE IN PRODUCTION'),
-('system_b', 'b4e2d0f5c3a6f7b9d8f0c2e4f6b8d0f2c4e6a8f0d2c4e6b8f0a2c4e6d8f0a2c4', 'Development key - DO NOT USE IN PRODUCTION');
+('system_a', 'f02cbb6e5afba5f5ed03f04691bb759b3c0e9a40e4fc2ff4a6cef40caaef09fc', 'Development key - DO NOT USE IN PRODUCTION'),
+('system_b', 'c00e4e16d783e7b03680d0cb04ff052cf56c77292f00d41a6cd84c88cec2dab1', 'Development key - DO NOT USE IN PRODUCTION');
 
 COMMIT;

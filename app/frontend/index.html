@@ -7,8 +7,9 @@
     internal integration service, not an end-user application, so a
     framework/bundler isn't warranted.
 
-    Three tabs:
-      - Systems: list/create/edit federated systems.
+    Four tabs:
+      - Systems: list/create/edit federated systems and their topic subscriptions.
+      - Topics: list/create/edit ticket categories/queues (e.g. INFRA, SPM, SALES).
       - Conversations: browse conversations and each participant's status.
       - Audit: browse the event log (audit_log).
 -->
@@ -27,6 +28,7 @@
 
     <nav class="tabs">
         <button class="tab-btn active" data-tab="systems">Systems</button>
+        <button class="tab-btn" data-tab="topics">Topics</button>
         <button class="tab-btn" data-tab="conversations">Conversations</button>
         <button class="tab-btn" data-tab="audit">Audit</button>
     </nav>
@@ -42,7 +44,7 @@
                 <thead>
                     <tr>
                         <th>Code</th><th>Name</th><th>Base URL</th>
-                        <th>Auth</th><th>Active</th><th>Updated</th>
+                        <th>Auth</th><th>Topics</th><th>Active</th><th>Updated</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -73,14 +75,56 @@
                     <label>Status mapping (JSON: internal → external)
                         <textarea name="status_mapping" rows="5" placeholder='{"new": "Open", "resolved": "Resolved"}'></textarea>
                     </label>
-                    <label>Payload template (JSON, with {external_ref}, {mapped_status}, {conversation_id})
+                    <label>Payload template (JSON, with {external_ref}, {mapped_status}, {conversation_id}, {source_ref}, {source_system}, {fanout_mode}; optionally split into "on_create"/"on_update" variants)
                         <textarea name="payload_template" rows="4" placeholder='{"id": "{external_ref}", "status": "{mapped_status}"}'></textarea>
                     </label>
+                    <fieldset id="system-topics-fieldset">
+                        <legend>Subscribed topics (receives every ticket/update for these)</legend>
+                        <div id="system-topics-checkboxes"></div>
+                    </fieldset>
                     <label class="checkbox">
                         <input type="checkbox" name="active" checked> Active
                     </label>
                     <div class="dialog-actions">
                         <button type="button" id="btn-cancel-system">Cancel</button>
+                        <button type="submit" class="btn-primary">Save</button>
+                    </div>
+                </form>
+            </dialog>
+        </section>
+
+        <!-- ================= TOPICS ================= -->
+        <section id="tab-topics" class="tab-panel">
+            <div class="panel-header">
+                <h2>Topics</h2>
+                <button id="btn-new-topic" class="btn-primary">+ New topic</button>
+            </div>
+            <table id="table-topics">
+                <thead>
+                    <tr>
+                        <th>Code</th><th>Name</th><th>Description</th><th>Active</th><th>Updated</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <dialog id="dialog-topic">
+                <form id="form-topic" method="dialog">
+                    <h3>Topic configuration</h3>
+                    <label>Code (immutable after creation)
+                        <input type="text" name="code" required placeholder="e.g. INFRA">
+                    </label>
+                    <label>Name
+                        <input type="text" name="name" required placeholder="e.g. Infrastructure">
+                    </label>
+                    <label>Description
+                        <input type="text" name="description" placeholder="optional">
+                    </label>
+                    <label class="checkbox">
+                        <input type="checkbox" name="active" checked> Active
+                    </label>
+                    <div class="dialog-actions">
+                        <button type="button" id="btn-cancel-topic">Cancel</button>
                         <button type="submit" class="btn-primary">Save</button>
                     </div>
                 </form>
@@ -96,11 +140,16 @@
                         <option value="">All</option>
                     </select>
                 </label>
+                <label>Filter by topic:
+                    <select id="filter-conversations-topic">
+                        <option value="">All</option>
+                    </select>
+                </label>
             </div>
             <table id="table-conversations">
                 <thead>
                     <tr>
-                        <th>ID</th><th>Subject</th><th>Overall status</th>
+                        <th>ID</th><th>Subject</th><th>Topic</th><th>Overall status</th>
                         <th>Participants</th><th>Updated</th>
                     </tr>
                 </thead>

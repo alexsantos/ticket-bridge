@@ -5,22 +5,32 @@ Management of the asynchronous PostgreSQL connection pool (via psycopg3 +
 pool).
 
 We deliberately keep database interaction as explicit SQL (no heavy ORM):
-the table count is small (6 tables), the concurrency logic (FOR UPDATE SKIP
-LOCKED) needs fine-grained control, and an ORM would add complexity without
-real benefit in this context.
+the table count is small, the concurrency logic (FOR UPDATE SKIP LOCKED)
+needs fine-grained control, and an ORM would add complexity without real
+benefit in this context.
 """
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+import psycopg
 from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
+from psycopg.types.json import JsonbBinaryDumper, JsonbDumper
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 _pool: AsyncConnectionPool | None = None
+
+# psycopg3 doesn't adapt plain dicts to jsonb by default (unlike psycopg2) -
+# every jsonb column in this schema (systems.auth_config/status_mapping/
+# payload_template, conversations.metadata, outbox.payload, audit_log.detail)
+# is written from a plain Python dict throughout the codebase, so register
+# this once globally instead of wrapping every call site in Jsonb(...).
+psycopg.adapters.register_dumper(dict, JsonbDumper)
+psycopg.adapters.register_dumper(dict, JsonbBinaryDumper)
 
 
 async def init_pool() -> None:

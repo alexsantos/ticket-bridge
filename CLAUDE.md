@@ -110,10 +110,10 @@ stored `local_status` against the new one before generating fan-out.
 ## Decision 6 — No ORM
 
 Database interaction uses explicit SQL via asynchronous `psycopg3`, not
-SQLAlchemy or another ORM. With 6 tables and relatively simple queries, an
-ORM would add a layer of abstraction with no real benefit, and the
-concurrency logic (`FOR UPDATE SKIP LOCKED`) is more direct to write and
-reason about in plain SQL than through ORM abstractions.
+SQLAlchemy or another ORM. With a handful of tables and relatively simple
+queries, an ORM would add a layer of abstraction with no real benefit, and
+the concurrency logic (`FOR UPDATE SKIP LOCKED`) is more direct to write
+and reason about in plain SQL than through ORM abstractions.
 
 ## Decision 7 — Frameworkless frontend
 
@@ -122,6 +122,57 @@ served as static files by FastAPI itself (`StaticFiles`). There is no
 build step (webpack/vite/etc.). Rationale: this is a low-traffic internal
 admin panel, not an end-user application — the maintenance cost of a build
 pipeline isn't justified by the gain.
+
+## Decision 8 — Topics: mandatory ticket categorization + subscription-driven fan-out
+
+**Problem closed**: Decision 3's fan-out only reaches systems that already
+hold a `conversation_participants` row for a conversation — a brand-new
+conversation notified nobody, because nobody had linked to it yet. A second
+system had to learn the `conversation_id` out-of-band and call
+`/api/v1/events` itself before it received anything. There was also no way
+to route a ticket to only the systems actually interested in that kind of
+work.
+
+**Decision made**: every conversation must declare a `topic_code` (from a
+`topics` lookup table, e.g. `INFRA`, `SPM`, `SALES`) at creation, immutable
+afterward. Each system declares its own interests in
+`system_topic_subscriptions`. Fan-out (`correlation_service.
+list_fanout_destinations`) is now driven strictly by "is this system
+currently subscribed to the conversation's topic" — not by prior
+participant membership. The name **`topic`** (not `subject`) was chosen
+deliberately to avoid colliding with the pre-existing free-text
+`conversations.subject` column (the human-readable ticket title, left
+untouched) — pub/sub terminology maps directly onto what this is.
+
+**Consciously chosen trade-offs**:
+- **A system must be subscribed to a topic to create a ticket under it.**
+  Not enforced as a side effect — an explicit check in
+  `app/api/events.py` before `find_or_create_conversation` runs.
+- **Unsubscribing is immediate and absolute.** A system that removes its
+  subscription to a topic stops receiving any further fan-out for that
+  topic right away, even for conversations it already has an open ticket
+  on — there is no "grandfathering" of existing participants. This favors
+  predictability ("your subscriptions are exactly what you get") over
+  guaranteeing continuity on tickets already in flight. If that proves too
+  strict in practice, the extension point is
+  `list_fanout_destinations`: add a `UNION` with systems that already hold
+  a `conversation_participants` row, the same way Decision 3's original
+  model worked.
+- **No new loop risk relative to Decision 5**: the source is still
+  unconditionally excluded from its own fan-out, and the destination query
+  still runs exactly once per inbound event — subscriptions only widen the
+  candidate list evaluated once, they don't add a new recursive trigger
+  path.
+
+**Payload template extension**: since fan-out can now reach a system with
+no prior link to the conversation, `_build_payload` (app/api/events.py)
+gained `{source_ref}`, `{source_system}`, and `{fanout_mode}`
+(`"create"`/`"update"`) placeholders, plus optional reserved
+`on_create`/`on_update` keys in `systems.payload_template` so a template
+can render "please open a ticket" differently from "update your existing
+ticket X." Templates that don't use these reserved keys resolve exactly as
+before — this is additive, not a breaking change to Decision 4's status
+mapping (which is untouched).
 
 ## What this skeleton assumes and leaves undecided
 

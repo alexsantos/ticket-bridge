@@ -11,8 +11,9 @@ between each other.
 Each team keeps using its own operational support application. Ticket
 Bridge sits in the middle: it receives creation/update events from one
 system, maintains the correlation (`conversation_id`), and distributes
-("fans out") the status change to every other system involved in that
-conversation.
+("fans out") the status change to every system currently subscribed to
+that ticket's **topic** (a mandatory category like `INFRA`, `SPM`, or
+`SALES` — see section 1).
 
 See **`CLAUDE.md`** for the full rationale behind the architecture decisions.
 
@@ -28,8 +29,9 @@ System B ──POST /api/v1/events──▶ │  (Cloud Run, FastAPI)│
 System C ──POST /api/v1/events──▶ │  PostgreSQL:         │
                                     │   - conversations     │
                                     │   - participants       │
-            ◀── outbox (HTTP) ──── │   - outbox (queue)       │
-                                    │   - audit_log            │
+            ◀── outbox (HTTP) ──── │   - topics + subscriptions│
+                                    │   - outbox (queue)          │
+                                    │   - audit_log                 │
                                     └──────────┬───────────┘
                                                │
                                      Cloud Scheduler
@@ -43,6 +45,11 @@ System C ──POST /api/v1/events──▶ │  PostgreSQL:         │
   lives in the database.
 - **N systems, not just 2**: `conversation_participants` allows associating
   as many systems as needed with the same conversation.
+- **Topic-driven, proactive fan-out**: every conversation belongs to exactly
+  one `topic` (e.g. `INFRA`); a system receives a ticket and every one of
+  its updates as long as it's subscribed to that topic — including brand
+  new tickets it has never seen before, not just ones it already linked to.
+  See CLAUDE.md Decision 8.
 
 ---
 
@@ -60,11 +67,12 @@ ticket-bridge/
 │   ├── api/
 │   │   ├── events.py            # POST /api/v1/events   (inbound)
 │   │   ├── sync.py              # POST /api/v1/sync     (processes outbox)
-│   │   ├── systems.py           # CRUD /api/v1/systems  (configuration)
+│   │   ├── systems.py           # CRUD /api/v1/systems  (configuration + topic subscriptions)
+│   │   ├── topics.py            # CRUD /api/v1/topics   (ticket categories, e.g. INFRA/SPM/SALES)
 │   │   ├── conversations.py     # GET  /api/v1/conversations
 │   │   └── audit.py             # GET  /api/v1/audit
 │   ├── services/
-│   │   ├── correlation_service.py  # conversation/participant management
+│   │   ├── correlation_service.py  # conversation/participant management + fan-out resolution
 │   │   ├── status_mapper.py        # status vocabulary translation
 │   │   ├── outbox_service.py       # table-based transactional queue (outbox pattern)
 │   │   ├── dispatcher.py           # HTTP delivery to each system
@@ -75,8 +83,8 @@ ticket-bridge/
 │       ├── style.css
 │       └── app.js
 ├── migrations/
-│   ├── 001_initial_schema.sql   # full schema (run first)
-│   └── 002_seed_example.sql     # sample data (development only)
+│   ├── 001_initial_schema.sql   # full schema, incl. topics/subscriptions (run first)
+│   └── 002_seed_example.sql     # sample systems, topics, subscriptions (development only)
 ├── tests/
 │   └── test_status_mapper.py
 ├── pyproject.toml               # project metadata and dependencies (uv)
@@ -135,16 +143,24 @@ Access:
 
 ### 3.3. Testing the end-to-end flow locally
 
+The seed data (`002_seed_example.sql`) subscribes `system_a` to `INFRA`,
+and `system_b` to both `INFRA` and `SPM`. Creating an `INFRA` ticket as
+`system_a` therefore fans out immediately to `system_b`, since it's
+subscribed - no prior linking required:
+
 ```bash
-# Create a conversation from "system_a" (uses the seed's sample key)
+# Create a ticket from "system_a" under the INFRA topic (uses the seed's sample key)
 curl -X POST http://localhost:8080/api/v1/events \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-key-system-a" \
-  -d '{"external_ref": "TICKET-123", "status": "new", "subject": "Lab printer malfunction"}'
+  -d '{"external_ref": "TICKET-123", "status": "new", "subject": "Lab printer malfunction", "topic_code": "INFRA"}'
 
-# Note: since "system_a" has no other participants in the conversation yet,
-# nothing is sent to the outbox on this first call - a second system needs
-# to join the same conversation_id returned in the response above.
+# Because "system_b" is subscribed to INFRA, this immediately creates an
+# outbox row destined for it - check via:
+psql "postgresql://localhost/ticketbridge" -c "SELECT id, destination, status FROM outbox;"
+
+# A system may only create tickets under topics it is itself subscribed
+# to - e.g. creating under "SALES" as "system_a" (not subscribed) returns 403.
 ```
 
 To run the automated tests:
@@ -322,6 +338,11 @@ as the only barrier.
 
 - **Adding a new system (e.g. a 3rd team)**: "Systems" tab in the frontend
   → "New system". Requires no code deployment.
+- **Adding a new topic / changing subscriptions**: "Topics" tab to create a
+  category; check/uncheck it in a system's dialog on the "Systems" tab to
+  change what that system receives. Both are no-deploy configuration
+  changes - unsubscribing takes effect immediately (see CLAUDE.md
+  Decision 8).
 - **Diagnosing a failed delivery**: "Audit" tab, filter by system;
   `delivery_failure` entries show the HTTP/network error. The corresponding
   row in the `outbox` table stays `pending` until `max_attempts`, at which

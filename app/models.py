@@ -25,6 +25,16 @@ class System(BaseModel):
     status_mapping: dict[str, str]
     payload_template: dict[str, Any]
     active: bool
+    topics: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+
+class Topic(BaseModel):
+    code: str
+    name: str
+    description: str | None
+    active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -41,6 +51,7 @@ class ConversationParticipant(BaseModel):
 class Conversation(BaseModel):
     conversation_id: UUID
     subject: str | None
+    topic_code: str
     overall_status: str
     metadata: dict[str, Any]
     created_at: datetime

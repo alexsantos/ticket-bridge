@@ -2,17 +2,19 @@
  * app.js
  * ------
  * Vanilla JavaScript (no framework/build step) that consumes the Ticket
- * Bridge REST API and populates the three tabs: Systems, Conversations,
- * Audit.
+ * Bridge REST API and populates the four tabs: Systems, Topics,
+ * Conversations, Audit.
  *
- * Note: these endpoints (/api/v1/systems, /api/v1/conversations,
- * /api/v1/audit) are assumed to be protected by Cloud Run IAM or by an
- * authentication proxy in front of the service - this file does not
- * implement login. See README.md, "Configuration frontend security"
- * section.
+ * Note: these endpoints (/api/v1/systems, /api/v1/topics,
+ * /api/v1/conversations, /api/v1/audit) are assumed to be protected by
+ * Cloud Run IAM or by an authentication proxy in front of the service -
+ * this file does not implement login. See README.md, "Configuration
+ * frontend security" section.
  */
 
 const API_BASE = "/api/v1";
+
+let allTopics = [];
 
 // ---------------------------------------------------------------------------
 // Tab navigation
@@ -25,6 +27,105 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
     });
 });
+
+// ---------------------------------------------------------------------------
+// Topics
+// ---------------------------------------------------------------------------
+async function loadTopics() {
+    const resp = await fetch(`${API_BASE}/topics`);
+    allTopics = await resp.json();
+
+    const tbody = document.querySelector("#table-topics tbody");
+    tbody.innerHTML = "";
+    for (const t of allTopics) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td><code>${t.code}</code></td>
+            <td>${t.name}</td>
+            <td>${t.description ?? "—"}</td>
+            <td><span class="badge ${t.active ? "active" : "inactive"}">${t.active ? "Active" : "Inactive"}</span></td>
+            <td>${formatDate(t.updated_at)}</td>
+        `;
+        tr.style.cursor = "pointer";
+        tr.addEventListener("click", () => openTopicDialog(t));
+        tbody.appendChild(tr);
+    }
+
+    populateTopicFilter();
+}
+
+const topicDialog = document.getElementById("dialog-topic");
+const topicForm = document.getElementById("form-topic");
+let topicCodeBeingEdited = null;
+
+document.getElementById("btn-new-topic").addEventListener("click", () => openTopicDialog(null));
+document.getElementById("btn-cancel-topic").addEventListener("click", () => topicDialog.close());
+
+function openTopicDialog(topic) {
+    topicForm.reset();
+    topicCodeBeingEdited = topic ? topic.code : null;
+    topicForm.code.disabled = !!topic;
+
+    if (topic) {
+        topicForm.code.value = topic.code;
+        topicForm.name.value = topic.name;
+        topicForm.description.value = topic.description ?? "";
+        topicForm.active.checked = topic.active;
+    }
+    topicDialog.showModal();
+}
+
+topicForm.addEventListener("submit", async () => {
+    const data = new FormData(topicForm);
+    const body = {
+        name: data.get("name"),
+        description: data.get("description") || null,
+        active: topicForm.active.checked,
+    };
+
+    if (topicCodeBeingEdited) {
+        await fetch(`${API_BASE}/topics/${topicCodeBeingEdited}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+    } else {
+        body.code = data.get("code");
+        await fetch(`${API_BASE}/topics`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+    }
+    await loadTopics();
+});
+
+function populateTopicFilter() {
+    const sel = document.getElementById("filter-conversations-topic");
+    while (sel.options.length > 1) sel.remove(1);
+    for (const t of allTopics) {
+        const opt = document.createElement("option");
+        opt.value = t.code;
+        opt.textContent = `${t.name} (${t.code})`;
+        sel.appendChild(opt);
+    }
+}
+
+function renderSystemTopicsCheckboxes(checkedCodes = []) {
+    const container = document.getElementById("system-topics-checkboxes");
+    container.innerHTML = "";
+    for (const t of allTopics) {
+        const label = document.createElement("label");
+        label.className = "checkbox";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = t.code;
+        input.checked = checkedCodes.includes(t.code);
+        label.appendChild(input);
+        label.append(` ${t.name} (${t.code})`);
+        container.appendChild(label);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Systems
@@ -50,6 +151,7 @@ async function loadSystems() {
             <td>${s.name}</td>
             <td>${s.base_url}</td>
             <td>${s.auth_type}</td>
+            <td>${(s.topics || []).join(", ") || "—"}</td>
             <td><span class="badge ${s.active ? "active" : "inactive"}">${s.active ? "Active" : "Inactive"}</span></td>
             <td>${formatDate(s.updated_at)}</td>
         `;
@@ -86,6 +188,7 @@ function openSystemDialog(system) {
         systemForm.status_mapping.value = JSON.stringify(system.status_mapping || {}, null, 2);
         systemForm.active.checked = system.active;
     }
+    renderSystemTopicsCheckboxes(system ? system.topics : []);
     systemDialog.showModal();
 }
 
@@ -102,6 +205,10 @@ systemForm.addEventListener("submit", async (ev) => {
         return;
     }
 
+    const topics = Array.from(
+        document.querySelectorAll("#system-topics-checkboxes input[type=checkbox]:checked")
+    ).map((el) => el.value);
+
     const body = {
         name: data.get("name"),
         base_url: data.get("base_url"),
@@ -110,6 +217,7 @@ systemForm.addEventListener("submit", async (ev) => {
         status_mapping: statusMapping,
         payload_template: payloadTemplate,
         active: systemForm.active.checked,
+        topics: topics,
     };
 
     if (codeBeingEdited) {
@@ -134,7 +242,11 @@ systemForm.addEventListener("submit", async (ev) => {
 // ---------------------------------------------------------------------------
 async function loadConversations() {
     const systemCode = document.getElementById("filter-conversations-system").value;
-    const qs = systemCode ? `?system_code=${encodeURIComponent(systemCode)}` : "";
+    const topicCode = document.getElementById("filter-conversations-topic").value;
+    const params = new URLSearchParams();
+    if (systemCode) params.set("system_code", systemCode);
+    if (topicCode) params.set("topic_code", topicCode);
+    const qs = params.toString() ? `?${params.toString()}` : "";
     const resp = await fetch(`${API_BASE}/conversations${qs}`);
     const conversations = await resp.json();
 
@@ -148,6 +260,7 @@ async function loadConversations() {
         tr.innerHTML = `
             <td><code>${c.conversation_id.slice(0, 8)}…</code></td>
             <td>${c.subject ?? "—"}</td>
+            <td><code>${c.topic_code}</code></td>
             <td>${c.overall_status}</td>
             <td>${participants}</td>
             <td>${formatDate(c.updated_at)}</td>
@@ -157,6 +270,7 @@ async function loadConversations() {
 }
 
 document.getElementById("filter-conversations-system").addEventListener("change", loadConversations);
+document.getElementById("filter-conversations-topic").addEventListener("change", loadConversations);
 
 // ---------------------------------------------------------------------------
 // Audit
@@ -199,6 +313,7 @@ function formatDate(iso) {
     try {
         await fetch("/health").then((r) => r.json());
         statusEl.textContent = "Connected to the service.";
+        await loadTopics();
         await loadSystems();
         await loadConversations();
         await loadAudit();
