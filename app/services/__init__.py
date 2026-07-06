@@ -1,10 +1,10 @@
 """
-Camada de serviços: lógica de negócio isolada dos endpoints HTTP (api/).
+Service layer: business logic isolated from the HTTP endpoints (api/).
 
-  - correlation_service: gestão de conversas e participantes.
-  - status_mapper: tradução de vocabulários de estado entre sistemas.
-  - outbox_service: fila transacional baseada em tabela (outbox pattern).
-  - dispatcher: entrega HTTP efetiva a cada sistema externo.
-  - secrets: resolução de segredos (Secret Manager / env local).
-  - audit_service: registo append-only de eventos para diagnóstico.
+  - correlation_service: management of conversations and participants.
+  - status_mapper: translation of status vocabularies between systems.
+  - outbox_service: table-based transactional queue (outbox pattern).
+  - dispatcher: actual HTTP delivery to each external system.
+  - secrets: secret resolution (Secret Manager / local env).
+  - audit_service: append-only event log for diagnostics.
 """

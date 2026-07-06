@@ -1,157 +1,158 @@
 # Ticket Bridge
 
-Serviço leve de correlação de tickets entre múltiplas aplicações de suporte,
-desenhado para substituir a função de "hub central" que o OSTicket
-desempenhava implicitamente quando duas (ou mais) equipas usavam a mesma
-ferramenta para acompanhar processos entre si.
+Lightweight ticket correlation service across multiple support applications,
+designed to replace the "central hub" role that OSTicket used to play
+implicitly when two (or more) teams used the same tool to track processes
+between each other.
 
-Cada equipa continua a usar a sua aplicação de suporte à operação. O Ticket
-Bridge fica no meio: recebe eventos de criação/atualização de um sistema,
-mantém a correlação (`conversation_id`) e distribui ("fan-out") a mudança de
-estado a todos os outros sistemas envolvidos nessa conversa.
+Each team keeps using its own operational support application. Ticket
+Bridge sits in the middle: it receives creation/update events from one
+system, maintains the correlation (`conversation_id`), and distributes
+("fans out") the status change to every other system involved in that
+conversation.
 
-Ver **`CLAUDE.md`** para o racional completo das decisões de arquitetura.
+See **`CLAUDE.md`** for the full rationale behind the architecture decisions.
 
 ---
 
-## 1. Arquitetura em resumo
+## 1. Architecture overview
 
 ```
-Sistema A ──POST /api/v1/events──▶ ┌────────────────────┐
+System A ──POST /api/v1/events──▶ ┌────────────────────┐
                                     │   Ticket Bridge     │
-Sistema B ──POST /api/v1/events──▶ │  (Cloud Run, FastAPI)│
+System B ──POST /api/v1/events──▶ │  (Cloud Run, FastAPI)│
                                     │                      │
-Sistema C ──POST /api/v1/events──▶ │  PostgreSQL:         │
+System C ──POST /api/v1/events──▶ │  PostgreSQL:         │
                                     │   - conversations     │
                                     │   - participants       │
-            ◀── outbox (HTTP) ──── │   - outbox (fila)       │
+            ◀── outbox (HTTP) ──── │   - outbox (queue)       │
                                     │   - audit_log            │
                                     └──────────┬───────────┘
                                                │
                                      Cloud Scheduler
-                                     (dispara /api/v1/sync
-                                      a cada 1-2 min)
+                                     (triggers /api/v1/sync
+                                      every 1-2 min)
 ```
 
-- **Sem broker externo** (RabbitMQ/Pub-Sub): a fila é uma tabela Postgres
-  (`outbox`), processada com `SELECT ... FOR UPDATE SKIP LOCKED`.
-- **Stateless**: qualquer instância Cloud Run pode processar qualquer
-  pedido; o estado vive todo na base de dados.
-- **N sistemas, não apenas 2**: `conversation_participants` permite associar
-  quantos sistemas forem necessários à mesma conversa.
+- **No external broker** (RabbitMQ/Pub-Sub): the queue is a Postgres table
+  (`outbox`), processed with `SELECT ... FOR UPDATE SKIP LOCKED`.
+- **Stateless**: any Cloud Run instance can process any request; all state
+  lives in the database.
+- **N systems, not just 2**: `conversation_participants` allows associating
+  as many systems as needed with the same conversation.
 
 ---
 
-## 2. Estrutura do projeto
+## 2. Project structure
 
 ```
 ticket-bridge/
 ├── app/
-│   ├── main.py                  # arranque da app, routers, health check
-│   ├── config.py                # configuração via variáveis de ambiente
-│   ├── database.py              # pool de ligações Postgres (psycopg3)
-│   ├── models.py                # modelos de domínio internos
-│   ├── schemas.py                # contratos de request/response da API
-│   ├── security.py              # autenticação (API keys, segredo do scheduler)
+│   ├── main.py                  # app startup, routers, health check
+│   ├── config.py                # configuration via environment variables
+│   ├── database.py              # Postgres connection pool (psycopg3)
+│   ├── models.py                # internal domain models
+│   ├── schemas.py                # API request/response contracts
+│   ├── security.py              # authentication (API keys, scheduler secret)
 │   ├── api/
-│   │   ├── events.py            # POST /api/v1/events   (entrada)
-│   │   ├── sync.py              # POST /api/v1/sync     (processa outbox)
-│   │   ├── systems.py           # CRUD /api/v1/systems  (configuração)
+│   │   ├── events.py            # POST /api/v1/events   (inbound)
+│   │   ├── sync.py              # POST /api/v1/sync     (processes outbox)
+│   │   ├── systems.py           # CRUD /api/v1/systems  (configuration)
 │   │   ├── conversations.py     # GET  /api/v1/conversations
 │   │   └── audit.py             # GET  /api/v1/audit
 │   ├── services/
-│   │   ├── correlation_service.py  # gestão de conversas/participantes
-│   │   ├── status_mapper.py        # tradução de vocabulários de estado
-│   │   ├── outbox_service.py       # fila transacional (outbox pattern)
-│   │   ├── dispatcher.py           # entrega HTTP a cada sistema
-│   │   ├── secrets.py              # resolução de segredos (Secret Manager / env)
-│   │   └── audit_service.py        # escrita/leitura de audit_log
+│   │   ├── correlation_service.py  # conversation/participant management
+│   │   ├── status_mapper.py        # status vocabulary translation
+│   │   ├── outbox_service.py       # table-based transactional queue (outbox pattern)
+│   │   ├── dispatcher.py           # HTTP delivery to each system
+│   │   ├── secrets.py              # secret resolution (Secret Manager / env)
+│   │   └── audit_service.py        # audit_log read/write
 │   └── frontend/
-│       ├── index.html           # painel de configuração/auditoria
+│       ├── index.html           # configuration/audit panel
 │       ├── style.css
 │       └── app.js
 ├── migrations/
-│   ├── 001_initial_schema.sql   # schema completo (correr primeiro)
-│   └── 002_seed_example.sql     # dados de exemplo (só desenvolvimento)
+│   ├── 001_initial_schema.sql   # full schema (run first)
+│   └── 002_seed_example.sql     # sample data (development only)
 ├── tests/
 │   └── test_status_mapper.py
 ├── requirements.txt
 ├── Dockerfile
 ├── .env.example
-├── CLAUDE.md                    # racional de arquitetura
-└── README.md                    # este ficheiro
+├── CLAUDE.md                    # architecture rationale
+└── README.md                    # this file
 ```
 
-Cada ficheiro `.py` tem um docstring no topo a explicar a sua
-responsabilidade — comece por aí ao explorar o código no PyCharm.
+Each `.py` file has a docstring at the top explaining its responsibility —
+start there when exploring the code in PyCharm.
 
 ---
 
-## 3. Correr localmente (desenvolvimento)
+## 3. Running locally (development)
 
-### 3.1. Pré-requisitos
+### 3.1. Prerequisites
 - Python 3.12+
-- PostgreSQL 15+ local (ou via Docker)
-- PyCharm (abrir a pasta `ticket-bridge/` como projeto; marcar `app` como
-  "Sources Root" se necessário)
+- Local PostgreSQL 15+ (or via Docker)
+- PyCharm (open the `ticket-bridge/` folder as a project; mark `app` as
+  "Sources Root" if needed)
 
-### 3.2. Passos
+### 3.2. Steps
 
 ```bash
-# 1. Criar ambiente virtual
+# 1. Create a virtual environment
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
-# 2. Instalar dependências
+# 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Criar base de dados local
+# 3. Create the local database
 createdb ticketbridge
 
-# 4. Correr as migrations
+# 4. Run the migrations
 psql "postgresql://localhost/ticketbridge" -f migrations/001_initial_schema.sql
-psql "postgresql://localhost/ticketbridge" -f migrations/002_seed_example.sql   # opcional, dados de exemplo
+psql "postgresql://localhost/ticketbridge" -f migrations/002_seed_example.sql   # optional, sample data
 
-# 5. Configurar variáveis de ambiente
+# 5. Configure environment variables
 cp .env.example .env
-# editar .env com as credenciais da BD local
+# edit .env with your local DB credentials
 
-# 6. Arrancar o servidor
+# 6. Start the server
 uvicorn app.main:app --reload --port 8080
 ```
 
-Aceder a:
+Access:
 - **Frontend**: http://localhost:8080/
-- **Documentação interativa da API (Swagger)**: http://localhost:8080/docs
+- **Interactive API documentation (Swagger)**: http://localhost:8080/docs
 - **Health check**: http://localhost:8080/health
 
-### 3.3. Testar o fluxo de ponta a ponta localmente
+### 3.3. Testing the end-to-end flow locally
 
 ```bash
-# Criar uma conversa a partir do "sistema_a" (usa a chave de exemplo do seed)
+# Create a conversation from "system_a" (uses the seed's sample key)
 curl -X POST http://localhost:8080/api/v1/events \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: dev-key-sistema-a" \
-  -d '{"ref_externa": "TICKET-123", "status": "novo", "assunto": "Impressora do laboratório com falha"}'
+  -H "X-API-Key: dev-key-system-a" \
+  -d '{"external_ref": "TICKET-123", "status": "new", "subject": "Lab printer malfunction"}'
 
-# Nota: como "sistema_a" ainda não tem outros participantes na conversa,
-# nada é enviado à outbox nesta primeira chamada - é preciso um segundo
-# sistema associar-se à mesma conversation_id devolvida na resposta acima.
+# Note: since "system_a" has no other participants in the conversation yet,
+# nothing is sent to the outbox on this first call - a second system needs
+# to join the same conversation_id returned in the response above.
 ```
 
-Para os testes automatizados:
+To run the automated tests:
 ```bash
 pytest tests/ -v
 ```
 
 ---
 
-## 4. Instalação em GCP (produção)
+## 4. Deploying to GCP (production)
 
-Esta secção assume um projeto GCP já existente e `gcloud` autenticado
-(`gcloud auth login`, `gcloud config set project SEU_PROJETO_ID`).
+This section assumes an existing GCP project and an authenticated `gcloud`
+(`gcloud auth login`, `gcloud config set project YOUR_PROJECT_ID`).
 
-### 4.1. Ativar APIs necessárias
+### 4.1. Enable required APIs
 
 ```bash
 gcloud services enable \
@@ -162,104 +163,104 @@ gcloud services enable \
     artifactregistry.googleapis.com
 ```
 
-### 4.2. Base de dados (Cloud SQL - PostgreSQL)
+### 4.2. Database (Cloud SQL - PostgreSQL)
 
 ```bash
-# Criar a instância (ajustar tier conforme carga esperada - db-f1-micro
-# chega perfeitamente para este volume de tráfego)
+# Create the instance (adjust the tier to expected load - db-f1-micro
+# is more than enough for this traffic volume)
 gcloud sql instances create ticket-bridge-db \
     --database-version=POSTGRES_16 \
     --tier=db-f1-micro \
     --region=europe-west1 \
     --storage-auto-increase
 
-# Criar a base de dados e o utilizador
+# Create the database and user
 gcloud sql databases create ticketbridge --instance=ticket-bridge-db
 gcloud sql users create ticketbridge \
     --instance=ticket-bridge-db \
-    --password="DEFINA_UMA_PASSWORD_FORTE_AQUI"
+    --password="SET_A_STRONG_PASSWORD_HERE"
 
-# Correr as migrations via Cloud SQL Auth Proxy
-cloud-sql-proxy SEU_PROJETO_ID:europe-west1:ticket-bridge-db &
+# Run the migrations via the Cloud SQL Auth Proxy
+cloud-sql-proxy YOUR_PROJECT_ID:europe-west1:ticket-bridge-db &
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/001_initial_schema.sql
-# (002_seed_example.sql é só para desenvolvimento - não correr em produção)
+# (002_seed_example.sql is for development only - do not run in production)
 ```
 
-### 4.3. Segredos (Secret Manager)
+### 4.3. Secrets (Secret Manager)
 
-Cada sistema externo tem uma referência de segredo (`secret_ref`) na sua
-configuração — é o valor que o dispatcher usa para autenticar chamadas de
-saída. Também o segredo partilhado do Cloud Scheduler e a password da BD
-devem viver aqui.
+Each external system has a secret reference (`secret_ref`) in its
+configuration — it's the value the dispatcher uses to authenticate
+outbound calls. The Cloud Scheduler shared secret and the DB password
+should also live here.
 
 ```bash
-echo -n "PASSWORD_DA_BD" | gcloud secrets create db-password --data-file=-
+echo -n "DB_PASSWORD" | gcloud secrets create db-password --data-file=-
 echo -n "$(openssl rand -base64 32)" | gcloud secrets create scheduler-shared-secret --data-file=-
 
-# Um segredo por sistema externo, nome igual ao 'secret_ref' configurado
-# no frontend para esse sistema:
-echo -n "CHAVE_DE_SAIDA_SISTEMA_A" | gcloud secrets create sistema_a_outbound_key --data-file=-
-echo -n "TOKEN_DE_SAIDA_SISTEMA_B" | gcloud secrets create sistema_b_outbound_token --data-file=-
+# One secret per external system, name matching the 'secret_ref' configured
+# in the frontend for that system:
+echo -n "SYSTEM_A_OUTBOUND_KEY" | gcloud secrets create system_a_outbound_key --data-file=-
+echo -n "SYSTEM_B_OUTBOUND_TOKEN" | gcloud secrets create system_b_outbound_token --data-file=-
 ```
 
-### 4.4. Service Account dedicada
+### 4.4. Dedicated service account
 
 ```bash
 gcloud iam service-accounts create ticket-bridge-sa \
     --display-name="Ticket Bridge Cloud Run"
 
-# Acesso ao Cloud SQL
-gcloud projects add-iam-policy-binding SEU_PROJETO_ID \
-    --member="serviceAccount:ticket-bridge-sa@SEU_PROJETO_ID.iam.gserviceaccount.com" \
+# Access to Cloud SQL
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:ticket-bridge-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/cloudsql.client"
 
-# Acesso aos segredos
-gcloud projects add-iam-policy-binding SEU_PROJETO_ID \
-    --member="serviceAccount:ticket-bridge-sa@SEU_PROJETO_ID.iam.gserviceaccount.com" \
+# Access to secrets
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:ticket-bridge-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/secretmanager.secretAccessor"
 ```
 
-### 4.5. Build e deploy no Cloud Run
+### 4.5. Build and deploy to Cloud Run
 
 ```bash
-# Build da imagem (Artifact Registry)
+# Build the image (Artifact Registry)
 gcloud artifacts repositories create ticket-bridge \
     --repository-format=docker --location=europe-west1
 
 gcloud builds submit --tag \
-    europe-west1-docker.pkg.dev/SEU_PROJETO_ID/ticket-bridge/app:latest
+    europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/ticket-bridge/app:latest
 
 # Deploy
 gcloud run deploy ticket-bridge \
-    --image=europe-west1-docker.pkg.dev/SEU_PROJETO_ID/ticket-bridge/app:latest \
+    --image=europe-west1-docker.pkg.dev/YOUR_PROJECT_ID/ticket-bridge/app:latest \
     --region=europe-west1 \
-    --service-account=ticket-bridge-sa@SEU_PROJETO_ID.iam.gserviceaccount.com \
-    --add-cloudsql-instances=SEU_PROJETO_ID:europe-west1:ticket-bridge-db \
-    --set-env-vars="ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=SEU_PROJETO_ID" \
-    --set-env-vars="DATABASE_URL=postgresql://ticketbridge:PASSWORD@/ticketbridge?host=/cloudsql/SEU_PROJETO_ID:europe-west1:ticket-bridge-db" \
+    --service-account=ticket-bridge-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+    --add-cloudsql-instances=YOUR_PROJECT_ID:europe-west1:ticket-bridge-db \
+    --set-env-vars="ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID" \
+    --set-env-vars="DATABASE_URL=postgresql://ticketbridge:PASSWORD@/ticketbridge?host=/cloudsql/YOUR_PROJECT_ID:europe-west1:ticket-bridge-db" \
     --set-secrets="SCHEDULER_SHARED_SECRET=scheduler-shared-secret:latest" \
     --no-allow-unauthenticated \
     --min-instances=0 \
     --max-instances=3
 ```
 
-> **Nota sobre a password da BD na `DATABASE_URL`**: para produção real,
-> prefira montar a `DATABASE_URL` completa também via `--set-secrets` em vez
-> de a passar em `--set-env-vars`, ou usar o
+> **Note on the DB password in `DATABASE_URL`**: for real production use,
+> prefer mounting the full `DATABASE_URL` via `--set-secrets` as well
+> instead of passing it in `--set-env-vars`, or use the
 > [Cloud SQL Python Connector](https://cloud.google.com/sql/docs/postgres/connect-connectors)
-> em vez de uma connection string com password embutida.
+> instead of a connection string with an embedded password.
 
-### 4.6. Cloud Scheduler (dispara o `/sync`)
+### 4.6. Cloud Scheduler (triggers `/sync`)
 
 ```bash
-# Dar à Scheduler uma identidade que possa invocar o serviço Cloud Run
+# Give the Scheduler an identity that can invoke the Cloud Run service
 gcloud iam service-accounts create ticket-bridge-scheduler \
     --display-name="Ticket Bridge Scheduler Invoker"
 
 gcloud run services add-iam-policy-binding ticket-bridge \
     --region=europe-west1 \
-    --member="serviceAccount:ticket-bridge-scheduler@SEU_PROJETO_ID.iam.gserviceaccount.com" \
+    --member="serviceAccount:ticket-bridge-scheduler@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
     --role="roles/run.invoker"
 
 SERVICE_URL=$(gcloud run services describe ticket-bridge --region=europe-west1 --format='value(status.url)')
@@ -269,70 +270,70 @@ gcloud scheduler jobs create http ticket-bridge-sync \
     --schedule="*/2 * * * *" \
     --uri="${SERVICE_URL}/api/v1/sync" \
     --http-method=POST \
-    --oidc-service-account-email="ticket-bridge-scheduler@SEU_PROJETO_ID.iam.gserviceaccount.com" \
-    --headers="X-Scheduler-Secret=VALOR_DO_SEGREDO_scheduler-shared-secret"
+    --oidc-service-account-email="ticket-bridge-scheduler@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+    --headers="X-Scheduler-Secret=VALUE_OF_scheduler-shared-secret"
 ```
 
-> **Segurança do `/sync`**: o exemplo acima combina OIDC nativo do Cloud
-> Scheduler (`--no-allow-unauthenticated` no Cloud Run + `--oidc-service-account-email`)
-> com o segredo partilhado no header, como defesa em profundidade. Em muitos
-> casos o OIDC sozinho já é suficiente; o segredo partilhado é uma camada
-> extra simples de manter.
+> **`/sync` security**: the example above combines Cloud Scheduler's native
+> OIDC (`--no-allow-unauthenticated` on Cloud Run + `--oidc-service-account-email`)
+> with the shared secret header, as defense in depth. In many cases OIDC
+> alone is already sufficient; the shared secret is a simple extra layer to
+> maintain.
 
-### 4.7. Registar os sistemas reais
+### 4.7. Registering the real systems
 
-Depois do deploy, aceder ao frontend em `${SERVICE_URL}/` (autenticado via
-IAM — ver secção seguinte) e criar os sistemas reais no separador
-"Sistemas", com os `secret_ref` a apontar para os segredos criados em 4.3.
-
----
-
-## 5. Segurança do frontend de configuração
-
-Os endpoints de configuração (`/api/v1/systems`) e auditoria
-(`/api/v1/conversations`, `/api/v1/audit`) **não têm autenticação própria**
-no código — o Cloud Run é implantado com `--no-allow-unauthenticated`, pelo
-que só quem tiver o papel `roles/run.invoker` consegue chamar o serviço.
-
-Para acesso humano ao frontend, as opções mais simples são:
-- **Identity-Aware Proxy (IAP)** à frente do Cloud Run — recomendado, dá
-  login com conta Google corporativa sem código adicional.
-- Túnel autenticado via `gcloud run services proxy ticket-bridge` para
-  acesso administrativo pontual sem expor o serviço publicamente.
-
-Os endpoints `/api/v1/events` (chamados pelos sistemas externos) e
-`/api/v1/sync` (chamado pelo Scheduler) têm a sua própria autenticação
-(API key por sistema / segredo do scheduler), independente do IAM do Cloud
-Run — por isso mesmo com `--no-allow-unauthenticated` pode ser necessário
-avaliar caso a caso se esses sistemas conseguem autenticar-se via IAM
-também, ou se precisam de `--allow-unauthenticated` com a autenticação
-aplicativa (API key) como única barreira.
+After deployment, access the frontend at `${SERVICE_URL}/` (authenticated
+via IAM — see the next section) and create the real systems in the
+"Systems" tab, with `secret_ref` pointing to the secrets created in 4.3.
 
 ---
 
-## 6. Operação do dia-a-dia
+## 5. Configuration frontend security
 
-- **Adicionar um novo sistema (ex: 3ª equipa)**: separador "Sistemas" no
-  frontend → "Novo sistema". Não requer deploy de código.
-- **Diagnosticar uma entrega falhada**: separador "Auditoria", filtrar por
-  sistema; entradas `entrega_falha` mostram o erro HTTP/rede. A linha
-  correspondente na tabela `outbox` mantém-se `pending` até
-  `max_tentativas`, altura em que passa a `failed` para intervenção manual.
-- **Reprocessar uma entrega falhada manualmente**:
+The configuration (`/api/v1/systems`) and audit (`/api/v1/conversations`,
+`/api/v1/audit`) endpoints **have no authentication of their own** in the
+code — Cloud Run is deployed with `--no-allow-unauthenticated`, so only
+principals with the `roles/run.invoker` role can call the service.
+
+For human access to the frontend, the simplest options are:
+- **Identity-Aware Proxy (IAP)** in front of Cloud Run — recommended, gives
+  login with a corporate Google account with no extra code.
+- An authenticated tunnel via `gcloud run services proxy ticket-bridge` for
+  occasional administrative access without publicly exposing the service.
+
+The `/api/v1/events` (called by external systems) and `/api/v1/sync`
+(called by the Scheduler) endpoints have their own authentication (per-system
+API key / scheduler secret), independent of Cloud Run IAM — so even with
+`--no-allow-unauthenticated` it may be necessary to evaluate case by case
+whether those systems can also authenticate via IAM, or whether they need
+`--allow-unauthenticated` with application-level authentication (API key)
+as the only barrier.
+
+---
+
+## 6. Day-to-day operation
+
+- **Adding a new system (e.g. a 3rd team)**: "Systems" tab in the frontend
+  → "New system". Requires no code deployment.
+- **Diagnosing a failed delivery**: "Audit" tab, filter by system;
+  `delivery_failure` entries show the HTTP/network error. The corresponding
+  row in the `outbox` table stays `pending` until `max_attempts`, at which
+  point it becomes `failed` for manual intervention.
+- **Manually retrying a failed delivery**:
   ```sql
-  UPDATE outbox SET status = 'pending', tentativas = 0
-  WHERE id = <id_da_linha>;
+  UPDATE outbox SET status = 'pending', attempts = 0
+  WHERE id = <row_id>;
   ```
-  A próxima execução do `/sync` volta a tentar.
+  The next `/sync` run will retry it.
 
 ---
 
-## 7. Próximos passos sugeridos (fora do âmbito deste esqueleto)
+## 7. Suggested next steps (out of scope for this skeleton)
 
-- Autenticação humana ao frontend (IAP).
-- Alertas (ex: Telegram, à semelhança de outros projetos internos) quando
-  entradas da outbox atingem `status = 'failed'`.
-- Paginação nos endpoints de listagem (`conversations`, `audit`) para
-  volumes de produção elevados.
-- Validação de assinatura de webhook (HMAC) em vez de apenas API key,
-  se algum sistema externo suportar.
+- Human authentication for the frontend (IAP).
+- Alerts (e.g. Telegram, similar to other internal projects) when outbox
+  entries reach `status = 'failed'`.
+- Pagination on the listing endpoints (`conversations`, `audit`) for higher
+  production volumes.
+- Webhook signature validation (HMAC) instead of just an API key, if any
+  external system supports it.

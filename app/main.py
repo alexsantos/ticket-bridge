@@ -1,19 +1,19 @@
 """
 main.py
 -------
-Ponto de entrada da aplicação FastAPI.
+FastAPI application entry point.
 
-Responsabilidades:
-  - Ciclo de vida (lifespan): abre/fecha o pool de ligações à base de dados.
-  - Regista os routers de cada área funcional (app/api/*).
-  - Serve o frontend estático de configuração/auditoria em "/".
-  - Endpoint de health check em "/health" (usado pelo Cloud Run).
+Responsibilities:
+  - Lifespan: opens/closes the database connection pool.
+  - Registers each functional area's routers (app/api/*).
+  - Serves the static configuration/audit frontend at "/".
+  - Health check endpoint at "/health" (used by Cloud Run).
 
-Correr localmente:
+Run locally:
     uvicorn app.main:app --reload --port 8080
 
-Correr em produção (Cloud Run):
-    ver Dockerfile - usa o mesmo comando uvicorn, sem --reload.
+Run in production (Cloud Run):
+    see Dockerfile - uses the same uvicorn command, without --reload.
 """
 import logging
 from contextlib import asynccontextmanager
@@ -34,15 +34,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
-    logger.info("Ticket Bridge iniciado (ambiente=%s).", settings.environment)
+    logger.info("Ticket Bridge started (environment=%s).", settings.environment)
     yield
     await close_pool()
-    logger.info("Ticket Bridge encerrado.")
+    logger.info("Ticket Bridge shut down.")
 
 
 app = FastAPI(
     title="Ticket Bridge",
-    description="Serviço de correlação de tickets entre múltiplas aplicações de suporte.",
+    description="Ticket correlation service across multiple support applications.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -56,10 +56,10 @@ app.include_router(audit.router)
 
 @app.get("/health", tags=["infra"])
 async def health() -> dict:
-    """Usado pelo Cloud Run / monitorização externa para verificar disponibilidade."""
+    """Used by Cloud Run / external monitoring to check availability."""
     return {"status": "ok"}
 
 
-# Frontend estático de configuração e auditoria (ver app/frontend/).
+# Static configuration and audit frontend (see app/frontend/).
 _frontend_dir = Path(__file__).parent / "frontend"
 app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")

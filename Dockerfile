@@ -1,20 +1,20 @@
 # Dockerfile
 # ----------
-# Imagem para deploy no Cloud Run. Multi-stage não é necessário aqui - as
-# dependências são leves (FastAPI + psycopg + httpx), por isso mantemos
-# uma única stage para simplicidade.
+# Image for deployment on Cloud Run. A multi-stage build isn't needed here -
+# the dependencies are lightweight (FastAPI + psycopg + httpx), so we keep
+# a single stage for simplicity.
 
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# psycopg[binary] já traz o driver compilado, não precisamos de libpq-dev.
+# psycopg[binary] already bundles the compiled driver, so libpq-dev isn't needed.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-# Cloud Run injeta a variável PORT - o uvicorn tem de a respeitar.
+# Cloud Run injects the PORT variable - uvicorn must respect it.
 ENV PORT=8080
 EXPOSE 8080
 

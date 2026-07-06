@@ -3,20 +3,21 @@ events.py
 ---------
 POST /api/v1/events
 
-Ponto de entrada único para os sistemas externos comunicarem criação ou
-mudança de estado de um ticket. Substitui a criação/atualização manual de
-tickets no OSTicket.
+Single entry point for external systems to communicate the creation or
+status change of a ticket. Replaces manual ticket creation/update in
+OSTicket.
 
-Fluxo (tudo numa única transação):
-  1. Autentica o sistema chamador via API key (dependency `authenticate_system`).
-  2. Cria ou localiza a conversa (correlation_service).
-  3. Compara o novo status com o último conhecido para este par
-     (conversa, sistema de origem) - só prossegue se houver mudança real
-     (proteção básica contra reenvios/eco).
-  4. Faz fan-out: para cada outro participante da conversa (ou para a lista
-     explícita de `destinatarios`), traduz o status para o vocabulário
-     desse sistema e insere uma linha na outbox.
-  5. Regista tudo em audit_log.
+Flow (all within a single transaction):
+  1. Authenticates the calling system via API key (`authenticate_system`
+     dependency).
+  2. Creates or locates the conversation (correlation_service).
+  3. Compares the new status with the last known one for this pair
+     (conversation, source system) - only proceeds if there's an actual
+     change (basic protection against resends/echo).
+  4. Performs fan-out: for each other participant in the conversation (or
+     the explicit `recipients` list), translates the status to that
+     system's vocabulary and inserts a row into the outbox.
+  5. Records everything in audit_log.
 """
 import logging
 from uuid import UUID
@@ -36,19 +37,19 @@ router = APIRouter(prefix="/api/v1/events", tags=["events"])
 @router.post("", response_model=IncomingEventResponse)
 async def receive_event(
     event: IncomingEvent,
-    origem: str = Depends(authenticate_system),
+    source: str = Depends(authenticate_system),
 ) -> IncomingEventResponse:
     async with get_connection() as conn:
         async with conn.transaction():
-            # 1. Correlação: cria ou localiza a conversa e atualiza o participante de origem.
+            # 1. Correlation: create or locate the conversation and update the source participant.
             try:
-                conversation_id, criada = await correlation_service.find_or_create_conversation(
+                conversation_id, created = await correlation_service.find_or_create_conversation(
                     conn,
                     conversation_id=event.conversation_id,
-                    origem=origem,
-                    ref_externa=event.ref_externa,
+                    source=source,
+                    external_ref=event.external_ref,
                     status=event.status,
-                    assunto=event.assunto,
+                    subject=event.subject,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -56,44 +57,44 @@ async def receive_event(
             await record_audit(
                 conn,
                 conversation_id=conversation_id,
-                sistema=origem,
-                evento_tipo="evento_recebido",
-                detalhe=event.model_dump(mode="json"),
+                system_code=source,
+                event_type="event_received",
+                detail=event.model_dump(mode="json"),
             )
 
-            # 2. Determina os destinatários do fan-out.
-            outros = await correlation_service.list_other_participants(
-                conn, conversation_id=conversation_id, excluir=origem
+            # 2. Determine the fan-out recipients.
+            others = await correlation_service.list_other_participants(
+                conn, conversation_id=conversation_id, exclude=source
             )
-            destinos_permitidos = set(event.destinatarios) if event.destinatarios else None
+            allowed_destinations = set(event.recipients) if event.recipients else None
             outbox_ids: list[int] = []
 
-            for participante in outros:
-                destino = participante["sistema"]
-                if destinos_permitidos is not None and destino not in destinos_permitidos:
+            for participant in others:
+                destination = participant["system_code"]
+                if allowed_destinations is not None and destination not in allowed_destinations:
                     continue
 
-                sistema_destino = await _get_system_config(conn, destino)
-                if sistema_destino is None or not sistema_destino["active"]:
-                    logger.warning("Destino '%s' inativo ou inexistente - a ignorar.", destino)
+                destination_system = await _get_system_config(conn, destination)
+                if destination_system is None or not destination_system["active"]:
+                    logger.warning("Destination '%s' inactive or nonexistent - skipping.", destination)
                     continue
 
-                status_traduzido = status_mapper.interno_para_externo(
-                    sistema_destino["status_mapping"], event.status
+                translated_status = status_mapper.internal_to_external(
+                    destination_system["status_mapping"], event.status
                 )
 
                 payload = _build_payload(
-                    template=sistema_destino["payload_template"],
-                    ref_externa=participante["ref_externa"],
-                    status_mapeado=status_traduzido,
+                    template=destination_system["payload_template"],
+                    external_ref=participant["external_ref"],
+                    mapped_status=translated_status,
                     conversation_id=conversation_id,
                 )
 
                 outbox_id = await outbox_service.enqueue(
                     conn,
                     conversation_id=conversation_id,
-                    destino=destino,
-                    origem=origem,
+                    destination=destination,
+                    source=source,
                     payload=payload,
                 )
                 outbox_ids.append(outbox_id)
@@ -101,44 +102,44 @@ async def receive_event(
             await record_audit(
                 conn,
                 conversation_id=conversation_id,
-                sistema=origem,
-                evento_tipo="fanout_agendado",
-                detalhe={"outbox_ids": outbox_ids, "destinos": [o["sistema"] for o in outros]},
+                system_code=source,
+                event_type="fanout_scheduled",
+                detail={"outbox_ids": outbox_ids, "destinations": [o["system_code"] for o in others]},
             )
 
-    return IncomingEventResponse(conversation_id=conversation_id, outbox_ids_criados=outbox_ids)
+    return IncomingEventResponse(conversation_id=conversation_id, created_outbox_ids=outbox_ids)
 
 
-async def _get_system_config(conn, codigo: str) -> dict | None:
+async def _get_system_config(conn, code: str) -> dict | None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT codigo, base_url, auth_type, auth_config, status_mapping, payload_template, active "
-            "FROM systems WHERE codigo = %(codigo)s",
-            {"codigo": codigo},
+            "SELECT code, base_url, auth_type, auth_config, status_mapping, payload_template, active "
+            "FROM systems WHERE code = %(code)s",
+            {"code": code},
         )
         return await cur.fetchone()
 
 
-def _build_payload(*, template: dict, ref_externa: str, status_mapeado: str, conversation_id: UUID) -> dict:
+def _build_payload(*, template: dict, external_ref: str, mapped_status: str, conversation_id: UUID) -> dict:
     """
-    Aplica substituição simples de placeholders {ref_externa}, {status_mapeado}
-    e {conversation_id} nos valores string do template configurado para o
-    sistema de destino (systems.payload_template).
+    Applies simple placeholder substitution for {external_ref},
+    {mapped_status} and {conversation_id} in the string values of the
+    template configured for the destination system (systems.payload_template).
     """
-    valores = {
-        "ref_externa": ref_externa,
-        "status_mapeado": status_mapeado,
+    values = {
+        "external_ref": external_ref,
+        "mapped_status": mapped_status,
         "conversation_id": str(conversation_id),
     }
 
     def _resolve(v):
         if isinstance(v, str):
-            return v.format(**valores)
+            return v.format(**values)
         if isinstance(v, dict):
             return {k: _resolve(val) for k, val in v.items()}
         return v
 
     if not template:
-        # Sem template configurado - usa uma forma genérica razoável.
-        return valores
+        # No template configured - use a reasonable generic shape.
+        return values
     return _resolve(template)

@@ -1,69 +1,70 @@
 -- =============================================================================
 -- 001_initial_schema.sql
 --
--- Migration inicial do Ticket Bridge.
--- Cria o modelo de dados que suporta correlação de N sistemas (fan-out),
--- outbox pattern para entrega assíncrona e auditoria completa de eventos.
+-- Initial Ticket Bridge migration.
+-- Creates the data model that supports correlation across N systems
+-- (fan-out), the outbox pattern for asynchronous delivery, and full event
+-- auditing.
 --
--- Correr com: psql "$DATABASE_URL" -f migrations/001_initial_schema.sql
+-- Run with: psql "$DATABASE_URL" -f migrations/001_initial_schema.sql
 -- =============================================================================
 
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS "pgcrypto"; -- necessário para gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "pgcrypto"; -- needed for gen_random_uuid()
 
 -- -----------------------------------------------------------------------------
 -- systems
 --
--- Regista cada aplicação externa que participa na federação (ex: sistema_a,
--- sistema_b, sistema_c). Toda a configuração específica de integração
--- (URL base, tipo de autenticação de saída, mapeamento de estados) vive aqui,
--- para que adicionar um novo sistema seja configuração, não código.
+-- Registers each external application participating in the federation (e.g.
+-- system_a, system_b, system_c). All integration-specific configuration
+-- (base URL, outbound auth type, status mapping) lives here, so that adding
+-- a new system is a configuration change, not a code change.
 -- -----------------------------------------------------------------------------
 CREATE TABLE systems (
-    codigo          TEXT PRIMARY KEY,               -- identificador curto, ex: 'sistema_a'
-    nome            TEXT NOT NULL,                   -- nome legível, ex: 'ServiceDesk Equipa Clínica'
-    base_url        TEXT NOT NULL,                   -- endpoint de saída (onde o bridge chama esse sistema)
+    code            TEXT PRIMARY KEY,               -- short identifier, e.g. 'system_a'
+    name            TEXT NOT NULL,                   -- human-readable name, e.g. 'Clinical Team ServiceDesk'
+    base_url        TEXT NOT NULL,                   -- outbound endpoint (where the bridge calls this system)
     auth_type       TEXT NOT NULL DEFAULT 'api_key', -- 'api_key' | 'bearer' | 'basic'
-    auth_config     JSONB NOT NULL DEFAULT '{}',     -- segredo referenciado (não guardar plaintext em prod, ver README)
-    status_mapping  JSONB NOT NULL DEFAULT '{}',     -- traduz vocabulário externo <-> vocabulário interno
-    payload_template JSONB NOT NULL DEFAULT '{}',    -- forma do payload esperado por este sistema
+    auth_config     JSONB NOT NULL DEFAULT '{}',     -- referenced secret (do not store plaintext in prod, see README)
+    status_mapping  JSONB NOT NULL DEFAULT '{}',     -- translates external vocabulary <-> internal vocabulary
+    payload_template JSONB NOT NULL DEFAULT '{}',    -- shape of the payload expected by this system
     active          BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE systems IS 'Sistemas externos federados através do bridge (substituem o OSTicket central).';
+COMMENT ON TABLE systems IS 'External systems federated through the bridge (replacing the central OSTicket).';
 
 -- -----------------------------------------------------------------------------
 -- api_keys
 --
--- Chaves de entrada (inbound): usadas para autenticar chamadas que CADA
--- sistema faz ao bridge em POST /api/v1/events. Guardamos apenas o hash.
+-- Inbound keys: used to authenticate calls that EACH system makes to the
+-- bridge on POST /api/v1/events. Only the hash is stored.
 -- -----------------------------------------------------------------------------
 CREATE TABLE api_keys (
     id          BIGSERIAL PRIMARY KEY,
-    sistema     TEXT NOT NULL REFERENCES systems(codigo) ON DELETE CASCADE,
-    key_hash    TEXT NOT NULL,               -- sha256 da chave, nunca a chave em texto simples
-    descricao   TEXT,
+    system_code TEXT NOT NULL REFERENCES systems(code) ON DELETE CASCADE,
+    key_hash    TEXT NOT NULL,               -- sha256 of the key, never the plaintext key
+    description TEXT,
     active      BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at  TIMESTAMPTZ
 );
 
-CREATE INDEX idx_api_keys_sistema ON api_keys(sistema) WHERE active = TRUE;
+CREATE INDEX idx_api_keys_system_code ON api_keys(system_code) WHERE active = TRUE;
 
 -- -----------------------------------------------------------------------------
 -- conversations
 --
--- Uma "conversa" é o equivalente ao ticket-mãe que o OSTicket antes
--- representava implicitamente. Não pertence a nenhum sistema em concreto -
--- é a entidade neutra que os une.
+-- A "conversation" is the equivalent of the parent ticket that OSTicket
+-- used to represent implicitly. It does not belong to any single system -
+-- it is the neutral entity that ties them together.
 -- -----------------------------------------------------------------------------
 CREATE TABLE conversations (
     conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    assunto         TEXT,
-    status_geral    TEXT NOT NULL DEFAULT 'aberto',  -- estado interno agregado (vocabulário comum)
+    subject         TEXT,
+    overall_status  TEXT NOT NULL DEFAULT 'open',    -- aggregated internal state (common vocabulary)
     metadata        JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -72,42 +73,42 @@ CREATE TABLE conversations (
 -- -----------------------------------------------------------------------------
 -- conversation_participants
 --
--- Liga uma conversa a cada sistema envolvido e guarda a referência externa
--- (o ID do ticket nesse sistema) e o último status conhecido nesse sistema.
--- Esta tabela é o que permite fan-out para N sistemas em vez de um par fixo
--- A<->B: para notificar todos os interessados numa mudança basta fazer
--- SELECT sistema FROM conversation_participants WHERE conversation_id = ...
+-- Links a conversation to each system involved and stores the external
+-- reference (the ticket ID in that system) and the last known status in
+-- that system. This table is what allows fan-out to N systems instead of a
+-- fixed A<->B pair: notifying everyone interested in a change is just
+-- SELECT system_code FROM conversation_participants WHERE conversation_id = ...
 -- -----------------------------------------------------------------------------
 CREATE TABLE conversation_participants (
     conversation_id UUID NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    sistema         TEXT NOT NULL REFERENCES systems(codigo),
-    ref_externa     TEXT NOT NULL,           -- ID do ticket no sistema externo
-    status_local    TEXT,                    -- último status conhecido, no vocabulário desse sistema
+    system_code     TEXT NOT NULL REFERENCES systems(code),
+    external_ref    TEXT NOT NULL,           -- ticket ID in the external system
+    local_status    TEXT,                    -- last known status, in that system's vocabulary
     joined_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (conversation_id, sistema)
+    PRIMARY KEY (conversation_id, system_code)
 );
 
-CREATE INDEX idx_participants_ref_externa ON conversation_participants(sistema, ref_externa);
+CREATE INDEX idx_participants_external_ref ON conversation_participants(system_code, external_ref);
 
 -- -----------------------------------------------------------------------------
 -- outbox
 --
--- Fila transacional baseada em tabela (outbox pattern). Cada linha representa
--- "isto tem de ser entregue a este sistema". É processada periodicamente pelo
--- endpoint /api/v1/sync (chamado pelo Cloud Scheduler), usando
--- SELECT ... FOR UPDATE SKIP LOCKED para segurança em concorrência sem
--- precisar de um broker externo (RabbitMQ/Pub-Sub).
+-- Table-based transactional queue (outbox pattern). Each row represents
+-- "this must be delivered to this system". It is processed periodically by
+-- the /api/v1/sync endpoint (called by Cloud Scheduler), using
+-- SELECT ... FOR UPDATE SKIP LOCKED for concurrency safety without needing
+-- an external broker (RabbitMQ/Pub-Sub).
 -- -----------------------------------------------------------------------------
 CREATE TABLE outbox (
     id              BIGSERIAL PRIMARY KEY,
     conversation_id UUID NOT NULL REFERENCES conversations(conversation_id) ON DELETE CASCADE,
-    destino         TEXT NOT NULL REFERENCES systems(codigo),
-    origem          TEXT NOT NULL REFERENCES systems(codigo),  -- quem gerou o evento (previne loops)
+    destination     TEXT NOT NULL REFERENCES systems(code),
+    source          TEXT NOT NULL REFERENCES systems(code),  -- who generated the event (prevents loops)
     payload         JSONB NOT NULL,
     status          TEXT NOT NULL DEFAULT 'pending',   -- pending | sent | failed
-    tentativas      INT NOT NULL DEFAULT 0,
-    max_tentativas  INT NOT NULL DEFAULT 5,
+    attempts        INT NOT NULL DEFAULT 0,
+    max_attempts    INT NOT NULL DEFAULT 5,
     last_error      TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     processed_at    TIMESTAMPTZ
@@ -119,16 +120,16 @@ CREATE INDEX idx_outbox_conversation ON outbox(conversation_id);
 -- -----------------------------------------------------------------------------
 -- audit_log
 --
--- Registo append-only de tudo o que aconteceu: eventos recebidos, entregas
--- feitas, falhas, alterações de configuração. É a base do separador de
--- "Auditoria" no frontend e o principal recurso de diagnóstico.
+-- Append-only record of everything that happened: events received,
+-- deliveries made, failures, configuration changes. This is the basis for
+-- the "Audit" tab in the frontend and the primary diagnostic resource.
 -- -----------------------------------------------------------------------------
 CREATE TABLE audit_log (
     id              BIGSERIAL PRIMARY KEY,
     conversation_id UUID REFERENCES conversations(conversation_id) ON DELETE SET NULL,
-    sistema         TEXT REFERENCES systems(codigo),
-    evento_tipo     TEXT NOT NULL,   -- ex: 'evento_recebido', 'entrega_sucesso', 'entrega_falha', 'config_alterada'
-    detalhe         JSONB NOT NULL DEFAULT '{}',
+    system_code     TEXT REFERENCES systems(code),
+    event_type      TEXT NOT NULL,   -- e.g. 'event_received', 'delivery_success', 'delivery_failure', 'config_changed'
+    detail          JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -136,7 +137,7 @@ CREATE INDEX idx_audit_conversation ON audit_log(conversation_id);
 CREATE INDEX idx_audit_created_at ON audit_log(created_at DESC);
 
 -- -----------------------------------------------------------------------------
--- trigger: manter updated_at atualizado automaticamente
+-- trigger: keep updated_at automatically up to date
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$

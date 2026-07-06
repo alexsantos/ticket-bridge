@@ -1,13 +1,13 @@
 """
 dispatcher.py
 -------------
-Responsável por entregar fisicamente (via HTTP) uma entrada da outbox ao
-sistema de destino, aplicando o tipo de autenticação configurado nesse
-sistema (systems.auth_type / auth_config).
+Responsible for physically delivering (via HTTP) an outbox entry to the
+destination system, applying the authentication type configured for that
+system (systems.auth_type / auth_config).
 
-Isolado do resto da lógica de sincronização (api/sync.py) para que os
-detalhes de "como falar HTTP com este sistema" não se espalhem pelo código
-de orquestração.
+Isolated from the rest of the synchronization logic (api/sync.py) so that
+the details of "how to speak HTTP to this system" don't spread across the
+orchestration code.
 """
 import logging
 from typing import Any
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class DeliveryError(Exception):
-    """Levantada quando a entrega a um sistema externo falha (HTTP erro ou timeout)."""
+    """Raised when delivery to an external system fails (HTTP error or timeout)."""
 
 
 async def deliver(
@@ -32,11 +32,11 @@ async def deliver(
     resolved_secret: str | None,
 ) -> None:
     """
-    Envia o payload ao sistema de destino.
+    Sends the payload to the destination system.
 
-    `resolved_secret` é o valor já resolvido do segredo referenciado em
-    auth_config['secret_ref'] (ver secrets.py) - o dispatcher nunca vai
-    buscar segredos diretamente, só os aplica.
+    `resolved_secret` is the already-resolved value of the secret
+    referenced in auth_config['secret_ref'] (see secrets.py) - the
+    dispatcher never fetches secrets directly, it only applies them.
     """
     settings = get_settings()
     headers = {"Content-Type": "application/json"}
@@ -55,9 +55,9 @@ async def deliver(
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         raise DeliveryError(
-            f"HTTP {exc.response.status_code} de {base_url}: {exc.response.text[:500]}"
+            f"HTTP {exc.response.status_code} from {base_url}: {exc.response.text[:500]}"
         ) from exc
     except httpx.RequestError as exc:
-        raise DeliveryError(f"Erro de rede ao contactar {base_url}: {exc}") from exc
+        raise DeliveryError(f"Network error contacting {base_url}: {exc}") from exc
 
-    logger.info("Entrega bem-sucedida para %s", base_url)
+    logger.info("Delivery succeeded for %s", base_url)

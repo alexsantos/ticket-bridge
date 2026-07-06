@@ -1,9 +1,9 @@
 """
 schemas.py
 ----------
-Contratos de entrada e saída (request/response) dos endpoints REST.
-Separados de models.py (domínio interno) para que a evolução da API pública
-não obrigue a alterar a estrutura interna, e vice-versa.
+Request/response contracts for the REST endpoints. Kept separate from
+models.py (internal domain) so that evolving the public API doesn't force
+changes to the internal structure, and vice versa.
 """
 from datetime import datetime
 from typing import Any, Literal
@@ -13,52 +13,52 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# Eventos recebidos de um sistema externo (POST /api/v1/events)
+# Events received from an external system (POST /api/v1/events)
 # ---------------------------------------------------------------------------
 class IncomingEvent(BaseModel):
     """
-    Payload que cada sistema externo envia ao bridge quando um ticket é
-    criado ou o seu estado muda.
+    Payload that each external system sends to the bridge when a ticket is
+    created or its status changes.
 
-    Se `conversation_id` vier vazio, assume-se criação de uma nova conversa
-    (ex: sistema_a abriu um ticket novo para sistema_b). Se vier preenchido,
-    é uma atualização de estado de uma conversa já existente.
+    If `conversation_id` is omitted, a new conversation is assumed to be
+    created (e.g. system_a opened a new ticket for system_b). If provided,
+    it's a status update to an existing conversation.
     """
     conversation_id: UUID | None = Field(
-        default=None, description="Omitir ao criar uma nova conversa."
+        default=None, description="Omit when creating a new conversation."
     )
-    ref_externa: str = Field(description="ID do ticket no sistema de origem.")
-    status: str = Field(description="Estado no vocabulário do sistema de origem.")
-    assunto: str | None = None
-    destinatarios: list[str] | None = Field(
+    external_ref: str = Field(description="Ticket ID in the source system.")
+    status: str = Field(description="Status in the source system's vocabulary.")
+    subject: str | None = None
+    recipients: list[str] | None = Field(
         default=None,
-        description="Códigos dos sistemas a notificar. Se omitido, notifica "
-                     "todos os outros participantes já associados à conversa.",
+        description="Codes of the systems to notify. If omitted, notifies "
+                     "every other participant already associated with the conversation.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class IncomingEventResponse(BaseModel):
     conversation_id: UUID
-    outbox_ids_criados: list[int]
+    created_outbox_ids: list[int]
 
 
 # ---------------------------------------------------------------------------
-# Sincronização (POST /api/v1/sync)
+# Synchronization (POST /api/v1/sync)
 # ---------------------------------------------------------------------------
 class SyncResult(BaseModel):
-    processadas: int
-    sucesso: int
-    falhas: int
-    detalhe: list[dict[str, Any]]
+    processed: int
+    success: int
+    failures: int
+    detail: list[dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
-# Configuração de sistemas (CRUD /api/v1/systems)
+# System configuration (CRUD /api/v1/systems)
 # ---------------------------------------------------------------------------
 class SystemCreate(BaseModel):
-    codigo: str
-    nome: str
+    code: str
+    name: str
     base_url: str
     auth_type: Literal["api_key", "bearer", "basic"] = "api_key"
     auth_config: dict[str, Any] = Field(default_factory=dict)
@@ -68,7 +68,7 @@ class SystemCreate(BaseModel):
 
 
 class SystemUpdate(BaseModel):
-    nome: str | None = None
+    name: str | None = None
     base_url: str | None = None
     auth_type: Literal["api_key", "bearer", "basic"] | None = None
     auth_config: dict[str, Any] | None = None
@@ -78,32 +78,32 @@ class SystemUpdate(BaseModel):
 
 
 class SystemOut(BaseModel):
-    codigo: str
-    nome: str
+    code: str
+    name: str
     base_url: str
     auth_type: str
     status_mapping: dict[str, str]
     active: bool
     created_at: datetime
     updated_at: datetime
-    # auth_config propositadamente omitido do output por defeito - pode
-    # conter referências a segredos. Ver endpoint dedicado se for necessário.
+    # auth_config intentionally omitted from the default output - it may
+    # contain references to secrets. See dedicated endpoint if needed.
 
 
 # ---------------------------------------------------------------------------
-# Conversas / Auditoria (consulta, read-only)
+# Conversations / Audit (read-only queries)
 # ---------------------------------------------------------------------------
 class ParticipantOut(BaseModel):
-    sistema: str
-    ref_externa: str
-    status_local: str | None
+    system_code: str
+    external_ref: str
+    local_status: str | None
     updated_at: datetime
 
 
 class ConversationOut(BaseModel):
     conversation_id: UUID
-    assunto: str | None
-    status_geral: str
+    subject: str | None
+    overall_status: str
     created_at: datetime
     updated_at: datetime
     participants: list[ParticipantOut]
@@ -112,7 +112,7 @@ class ConversationOut(BaseModel):
 class AuditLogOut(BaseModel):
     id: int
     conversation_id: UUID | None
-    sistema: str | None
-    evento_tipo: str
-    detalhe: dict[str, Any]
+    system_code: str | None
+    event_type: str
+    detail: dict[str, Any]
     created_at: datetime

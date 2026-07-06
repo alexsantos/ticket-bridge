@@ -1,10 +1,10 @@
 """
 audit_service.py
 -----------------
-Escrita e leitura do registo de auditoria (`audit_log`). É append-only por
-desenho - nunca há UPDATE nem DELETE sobre esta tabela a partir da aplicação.
-É a base do separador "Auditoria" do frontend e o primeiro sítio a olhar
-quando algo corre mal numa integração.
+Writing to and reading from the audit trail (`audit_log`). It's append-only
+by design - the application never issues UPDATE or DELETE against this
+table. It's the basis for the frontend's "Audit" tab and the first place to
+look when something goes wrong in an integration.
 """
 from typing import Any
 from uuid import UUID
@@ -15,23 +15,23 @@ from psycopg import AsyncConnection
 async def record_audit(
     conn: AsyncConnection,
     *,
-    evento_tipo: str,
+    event_type: str,
     conversation_id: UUID | None = None,
-    sistema: str | None = None,
-    detalhe: dict[str, Any] | None = None,
+    system_code: str | None = None,
+    detail: dict[str, Any] | None = None,
 ) -> None:
-    """Grava uma linha de auditoria. Deve ser chamado dentro da mesma transação do evento de negócio associado."""
+    """Writes an audit row. Should be called within the same transaction as the associated business event."""
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO audit_log (conversation_id, sistema, evento_tipo, detalhe)
-            VALUES (%(cid)s, %(sistema)s, %(tipo)s, %(detalhe)s)
+            INSERT INTO audit_log (conversation_id, system_code, event_type, detail)
+            VALUES (%(cid)s, %(system_code)s, %(type)s, %(detail)s)
             """,
             {
                 "cid": conversation_id,
-                "sistema": sistema,
-                "tipo": evento_tipo,
-                "detalhe": detalhe or {},
+                "system_code": system_code,
+                "type": event_type,
+                "detail": detail or {},
             },
         )
 
@@ -41,25 +41,25 @@ async def list_recent(
     *,
     limit: int = 100,
     conversation_id: UUID | None = None,
-    sistema: str | None = None,
+    system_code: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Lista as entradas de auditoria mais recentes, com filtros opcionais."""
-    filtros = []
+    """Lists the most recent audit entries, with optional filters."""
+    filters = []
     params: dict[str, Any] = {"limit": limit}
 
     if conversation_id is not None:
-        filtros.append("conversation_id = %(cid)s")
+        filters.append("conversation_id = %(cid)s")
         params["cid"] = conversation_id
-    if sistema is not None:
-        filtros.append("sistema = %(sistema)s")
-        params["sistema"] = sistema
+    if system_code is not None:
+        filters.append("system_code = %(system_code)s")
+        params["system_code"] = system_code
 
-    where_clause = f"WHERE {' AND '.join(filtros)}" if filtros else ""
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 
     async with conn.cursor() as cur:
         await cur.execute(
             f"""
-            SELECT id, conversation_id, sistema, evento_tipo, detalhe, created_at
+            SELECT id, conversation_id, system_code, event_type, detail, created_at
             FROM audit_log
             {where_clause}
             ORDER BY created_at DESC

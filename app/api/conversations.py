@@ -1,10 +1,9 @@
 """
 conversations.py
 -----------------
-Endpoints de consulta (read-only) de conversas e respetivos participantes -
-usado pelo frontend para o separador "Conversas" (visão operacional de
-o que está correlacionado com o quê, equivalente a navegar tickets no
-antigo OSTicket).
+Read-only query endpoints for conversations and their participants - used
+by the frontend's "Conversations" tab (an operational view of what's
+correlated with what, equivalent to browsing tickets in the old OSTicket).
 """
 from uuid import UUID
 
@@ -19,39 +18,39 @@ router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
 @router.get("", response_model=list[ConversationOut])
 async def list_conversations(
     limit: int = Query(default=50, le=200),
-    sistema: str | None = None,
+    system_code: str | None = None,
 ) -> list[ConversationOut]:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            if sistema:
+            if system_code:
                 await cur.execute(
                     """
-                    SELECT DISTINCT c.conversation_id, c.assunto, c.status_geral, c.created_at, c.updated_at
+                    SELECT DISTINCT c.conversation_id, c.subject, c.overall_status, c.created_at, c.updated_at
                     FROM conversations c
                     JOIN conversation_participants p ON p.conversation_id = c.conversation_id
-                    WHERE p.sistema = %(sistema)s
+                    WHERE p.system_code = %(system_code)s
                     ORDER BY c.updated_at DESC
                     LIMIT %(limit)s
                     """,
-                    {"sistema": sistema, "limit": limit},
+                    {"system_code": system_code, "limit": limit},
                 )
             else:
                 await cur.execute(
                     """
-                    SELECT conversation_id, assunto, status_geral, created_at, updated_at
+                    SELECT conversation_id, subject, overall_status, created_at, updated_at
                     FROM conversations
                     ORDER BY updated_at DESC
                     LIMIT %(limit)s
                     """,
                     {"limit": limit},
                 )
-            conversas = await cur.fetchall()
+            conversations = await cur.fetchall()
 
-        resultado = []
-        for c in conversas:
-            participantes = await _fetch_participants(conn, c["conversation_id"])
-            resultado.append(ConversationOut(**c, participants=participantes))
-    return resultado
+        result = []
+        for c in conversations:
+            participants = await _fetch_participants(conn, c["conversation_id"])
+            result.append(ConversationOut(**c, participants=participants))
+    return result
 
 
 @router.get("/{conversation_id}", response_model=ConversationOut)
@@ -60,28 +59,28 @@ async def get_conversation(conversation_id: UUID) -> ConversationOut:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT conversation_id, assunto, status_geral, created_at, updated_at
+                SELECT conversation_id, subject, overall_status, created_at, updated_at
                 FROM conversations WHERE conversation_id = %(id)s
                 """,
                 {"id": conversation_id},
             )
-            conversa = await cur.fetchone()
+            conversation = await cur.fetchone()
 
-        if conversa is None:
-            raise HTTPException(status_code=404, detail="Conversa não encontrada.")
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
 
-        participantes = await _fetch_participants(conn, conversation_id)
-    return ConversationOut(**conversa, participants=participantes)
+        participants = await _fetch_participants(conn, conversation_id)
+    return ConversationOut(**conversation, participants=participants)
 
 
 async def _fetch_participants(conn, conversation_id: UUID) -> list[ParticipantOut]:
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT sistema, ref_externa, status_local, updated_at
+            SELECT system_code, external_ref, local_status, updated_at
             FROM conversation_participants
             WHERE conversation_id = %(id)s
-            ORDER BY sistema
+            ORDER BY system_code
             """,
             {"id": conversation_id},
         )

@@ -1,12 +1,12 @@
 """
 correlation_service.py
 -----------------------
-Responsável por manter a "verdade" sobre conversas e os seus participantes:
-criar novas conversas, associar sistemas, e atualizar o status local de um
-participante quando chega um evento.
+Responsible for maintaining the "truth" about conversations and their
+participants: creating new conversations, associating systems, and updating
+a participant's local status when an event arrives.
 
-Não sabe nada sobre HTTP nem sobre a outbox - só sobre o estado relacional
-em `conversations` e `conversation_participants`.
+Knows nothing about HTTP or the outbox - only about the relational state in
+`conversations` and `conversation_participants`.
 """
 from typing import Any
 from uuid import UUID
@@ -20,19 +20,19 @@ async def find_or_create_conversation(
     conn: AsyncConnection,
     *,
     conversation_id: UUID | None,
-    origem: str,
-    ref_externa: str,
+    source: str,
+    external_ref: str,
     status: str,
-    assunto: str | None,
+    subject: str | None,
 ) -> tuple[UUID, bool]:
     """
-    Devolve o conversation_id a usar e um booleano indicando se foi criada
-    agora (True) ou se já existia (False).
+    Returns the conversation_id to use and a boolean indicating whether it
+    was just created (True) or already existed (False).
 
-    Regras:
-      - Se `conversation_id` for fornecido, a conversa tem de já existir.
-      - Se não for fornecido, cria-se uma conversa nova com o sistema de
-        origem como primeiro participante.
+    Rules:
+      - If `conversation_id` is provided, the conversation must already exist.
+      - If not provided, a new conversation is created with the source
+        system as its first participant.
     """
     async with conn.cursor() as cur:
         if conversation_id is not None:
@@ -42,96 +42,96 @@ async def find_or_create_conversation(
             )
             row = await cur.fetchone()
             if row is None:
-                raise ValueError(f"Conversa {conversation_id} não existe.")
-            criada = False
+                raise ValueError(f"Conversation {conversation_id} does not exist.")
+            created = False
         else:
             await cur.execute(
                 """
-                INSERT INTO conversations (assunto, status_geral, metadata)
-                VALUES (%(assunto)s, %(status)s, '{}'::jsonb)
+                INSERT INTO conversations (subject, overall_status, metadata)
+                VALUES (%(subject)s, %(status)s, '{}'::jsonb)
                 RETURNING conversation_id
                 """,
-                {"assunto": assunto, "status": status},
+                {"subject": subject, "status": status},
             )
             row = await cur.fetchone()
             conversation_id = row["conversation_id"]
-            criada = True
+            created = True
 
         await _upsert_participant(
             cur,
             conversation_id=conversation_id,
-            sistema=origem,
-            ref_externa=ref_externa,
-            status_local=status,
+            system_code=source,
+            external_ref=external_ref,
+            local_status=status,
         )
 
-    if criada:
+    if created:
         await record_audit(
             conn,
             conversation_id=conversation_id,
-            sistema=origem,
-            evento_tipo="conversa_criada",
-            detalhe={"ref_externa": ref_externa, "status": status},
+            system_code=source,
+            event_type="conversation_created",
+            detail={"external_ref": external_ref, "status": status},
         )
 
-    return conversation_id, criada
+    return conversation_id, created
 
 
 async def _upsert_participant(
-    cur, *, conversation_id: UUID, sistema: str, ref_externa: str, status_local: str
+    cur, *, conversation_id: UUID, system_code: str, external_ref: str, local_status: str
 ) -> None:
     await cur.execute(
         """
         INSERT INTO conversation_participants
-            (conversation_id, sistema, ref_externa, status_local)
-        VALUES (%(cid)s, %(sistema)s, %(ref)s, %(status)s)
-        ON CONFLICT (conversation_id, sistema)
+            (conversation_id, system_code, external_ref, local_status)
+        VALUES (%(cid)s, %(system_code)s, %(ref)s, %(status)s)
+        ON CONFLICT (conversation_id, system_code)
         DO UPDATE SET
-            ref_externa = EXCLUDED.ref_externa,
-            status_local = EXCLUDED.status_local,
+            external_ref = EXCLUDED.external_ref,
+            local_status = EXCLUDED.local_status,
             updated_at = now()
         """,
-        {"cid": conversation_id, "sistema": sistema, "ref": ref_externa, "status": status_local},
+        {"cid": conversation_id, "system_code": system_code, "ref": external_ref, "status": local_status},
     )
 
 
 async def get_participant_status(
-    conn: AsyncConnection, *, conversation_id: UUID, sistema: str
+    conn: AsyncConnection, *, conversation_id: UUID, system_code: str
 ) -> str | None:
-    """Devolve o status_local atualmente guardado para (conversa, sistema), ou None se não existir."""
+    """Returns the local_status currently stored for (conversation, system), or None if it doesn't exist."""
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT status_local FROM conversation_participants
-            WHERE conversation_id = %(cid)s AND sistema = %(sistema)s
+            SELECT local_status FROM conversation_participants
+            WHERE conversation_id = %(cid)s AND system_code = %(system_code)s
             """,
-            {"cid": conversation_id, "sistema": sistema},
+            {"cid": conversation_id, "system_code": system_code},
         )
         row = await cur.fetchone()
-    return row["status_local"] if row else None
+    return row["local_status"] if row else None
 
 
 async def list_other_participants(
-    conn: AsyncConnection, *, conversation_id: UUID, excluir: str
+    conn: AsyncConnection, *, conversation_id: UUID, exclude: str
 ) -> list[dict[str, Any]]:
-    """Lista os participantes de uma conversa exceto o sistema de origem - usado para o fan-out."""
+    """Lists a conversation's participants except the source system - used for fan-out."""
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT sistema, ref_externa, status_local
+            SELECT system_code, external_ref, local_status
             FROM conversation_participants
-            WHERE conversation_id = %(cid)s AND sistema != %(excluir)s
+            WHERE conversation_id = %(cid)s AND system_code != %(exclude)s
             """,
-            {"cid": conversation_id, "excluir": excluir},
+            {"cid": conversation_id, "exclude": exclude},
         )
         return await cur.fetchall()
 
 
-async def update_conversation_status_geral(
-    conn: AsyncConnection, *, conversation_id: UUID, status_geral: str
+async def update_conversation_overall_status(
+    conn: AsyncConnection, *, conversation_id: UUID, overall_status: str
 ) -> None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "UPDATE conversations SET status_geral = %(status)s WHERE conversation_id = %(cid)s",
-            {"status": status_geral, "cid": conversation_id},
+            "UPDATE conversations SET overall_status = %(status)s WHERE conversation_id = %(cid)s",
+            {"status": overall_status, "cid": conversation_id},
         )

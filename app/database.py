@@ -1,12 +1,13 @@
 """
 database.py
 -----------
-Gestão do pool de ligações assíncronas ao PostgreSQL (via psycopg3 + pool).
+Management of the asynchronous PostgreSQL connection pool (via psycopg3 +
+pool).
 
-Mantemos a interação com a base de dados em SQL explícito (sem ORM pesado)
-propositadamente: o volume de tabelas é pequeno (6 tabelas), a lógica de
-concorrência (FOR UPDATE SKIP LOCKED) precisa de controlo fino, e um ORM
-acrescentaria complexidade sem benefício real neste contexto.
+We deliberately keep database interaction as explicit SQL (no heavy ORM):
+the table count is small (6 tables), the concurrency logic (FOR UPDATE SKIP
+LOCKED) needs fine-grained control, and an ORM would add complexity without
+real benefit in this context.
 """
 import logging
 from contextlib import asynccontextmanager
@@ -23,7 +24,7 @@ _pool: AsyncConnectionPool | None = None
 
 
 async def init_pool() -> None:
-    """Inicializa o pool de ligações. Chamado no arranque da aplicação (lifespan)."""
+    """Initializes the connection pool. Called at application startup (lifespan)."""
     global _pool
     settings = get_settings()
     _pool = AsyncConnectionPool(
@@ -34,28 +35,29 @@ async def init_pool() -> None:
         open=False,
     )
     await _pool.open(wait=True, timeout=15)
-    logger.info("Pool de ligações à base de dados inicializado.")
+    logger.info("Database connection pool initialized.")
 
 
 async def close_pool() -> None:
-    """Fecha o pool de ligações. Chamado no encerramento da aplicação (lifespan)."""
+    """Closes the connection pool. Called at application shutdown (lifespan)."""
     global _pool
     if _pool is not None:
         await _pool.close()
-        logger.info("Pool de ligações à base de dados encerrado.")
+        logger.info("Database connection pool closed.")
 
 
 @asynccontextmanager
 async def get_connection() -> AsyncIterator:
     """
-    Context manager para obter uma ligação do pool dentro de um endpoint/serviço.
+    Context manager to obtain a connection from the pool within an
+    endpoint/service.
 
-    Uso típico:
+    Typical usage:
         async with get_connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("SELECT ...")
     """
     if _pool is None:
-        raise RuntimeError("Pool de ligações não inicializado - init_pool() não foi chamado.")
+        raise RuntimeError("Connection pool not initialized - init_pool() was not called.")
     async with _pool.connection() as conn:
         yield conn

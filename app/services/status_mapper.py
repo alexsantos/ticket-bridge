@@ -1,57 +1,57 @@
 """
 status_mapper.py
 -----------------
-Traduz estados entre o "vocabulário comum" interno (ex: 'novo',
-'em_progresso', 'aguarda_terceiros', 'resolvido', 'fechado') e o
-vocabulário específico de cada sistema externo (ex: 'Aberto' no sistema A,
-'NEW' no sistema B).
+Translates statuses between the internal "common vocabulary" (e.g. 'new',
+'in_progress', 'waiting_third_party', 'resolved', 'closed') and the
+vocabulary specific to each external system (e.g. 'Open' in system A,
+'NEW' in system B).
 
-O mapeamento fica configurado em `systems.status_mapping` (JSON:
-vocabulário_interno -> vocabulário_externo). Isto evita hardcode de estados
-por sistema no código - adicionar um sistema novo é só preencher esta
-configuração.
+The mapping is configured in `systems.status_mapping` (JSON:
+internal_vocabulary -> external_vocabulary). This avoids hardcoding
+per-system statuses in code - adding a new system is just a matter of
+filling in this configuration.
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
-# Vocabulário interno "canónico". Sistemas novos devem mapear os seus
-# próprios estados para um destes valores.
-VOCABULARIO_INTERNO = {
-    "novo",
-    "em_progresso",
-    "aguarda_terceiros",
-    "resolvido",
-    "fechado",
+# "Canonical" internal vocabulary. New systems must map their own statuses
+# to one of these values.
+INTERNAL_VOCABULARY = {
+    "new",
+    "in_progress",
+    "waiting_third_party",
+    "resolved",
+    "closed",
 }
 
 
-def externo_para_interno(status_mapping: dict[str, str], status_externo: str) -> str:
+def external_to_internal(status_mapping: dict[str, str], external_status: str) -> str:
     """
-    Converte um status no vocabulário de um sistema externo para o
-    vocabulário interno. status_mapping é {interno: externo}, por isso
-    invertemos a procura.
+    Converts a status in an external system's vocabulary to the internal
+    vocabulary. status_mapping is {internal: external}, so we invert the
+    lookup.
 
-    Se não houver mapeamento conhecido, devolve o valor original em minúsculas
-    e regista um aviso - preferimos não perder a informação a falhar.
+    If there's no known mapping, returns the original value lowercased and
+    logs a warning - we prefer not to lose information over failing.
     """
-    invertido = {v: k for k, v in status_mapping.items()}
-    if status_externo in invertido:
-        return invertido[status_externo]
+    inverted = {v: k for k, v in status_mapping.items()}
+    if external_status in inverted:
+        return inverted[external_status]
 
     logger.warning(
-        "Status externo '%s' sem mapeamento conhecido; a usar valor literal.", status_externo
+        "External status '%s' has no known mapping; using literal value.", external_status
     )
-    return status_externo.lower()
+    return external_status.lower()
 
 
-def interno_para_externo(status_mapping: dict[str, str], status_interno: str) -> str:
-    """Converte um status do vocabulário interno para o vocabulário de um sistema de destino."""
-    if status_interno in status_mapping:
-        return status_mapping[status_interno]
+def internal_to_external(status_mapping: dict[str, str], internal_status: str) -> str:
+    """Converts a status from the internal vocabulary to a destination system's vocabulary."""
+    if internal_status in status_mapping:
+        return status_mapping[internal_status]
 
     logger.warning(
-        "Status interno '%s' sem mapeamento para este sistema; a usar valor literal.",
-        status_interno,
+        "Internal status '%s' has no mapping for this system; using literal value.",
+        internal_status,
     )
-    return status_interno
+    return internal_status

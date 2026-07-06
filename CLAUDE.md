@@ -1,152 +1,152 @@
 # CLAUDE.md — Ticket Bridge
 
-Este ficheiro é a fonte de verdade sobre **porquê** o sistema está desenhado
-como está. Serve para retomar contexto em sessões futuras (humanas ou com
-assistência de IA) sem repetir a discussão de arquitetura desde o início.
+This file is the source of truth for **why** the system is designed the
+way it is. It exists to regain context in future sessions (human or
+AI-assisted) without repeating the architecture discussion from scratch.
 
-## Problema original
+## Original problem
 
-Duas equipas usavam o OSTicket como sistema partilhado: uma equipa cria um
-ticket para a outra, ambas acompanham o estado no mesmo sítio. O OSTicket
-vai ser desligado. Cada equipa vai passar a usar a sua própria aplicação de
-suporte à operação (diferente uma da outra), e é preciso preservar a
-capacidade de correlacionar e sincronizar o estado de um "processo" entre
-os dois (e potencialmente mais) sistemas.
+Two teams used OSTicket as a shared system: one team creates a ticket for
+the other, and both track its status in the same place. OSTicket is being
+decommissioned. Each team will move to its own operational support
+application (different from each other), and the ability to correlate and
+synchronize the state of a "process" across the two (and potentially more)
+systems needs to be preserved.
 
-## Decisão 1 — Bridge central, não ligação direta ponto-a-ponto
+## Decision 1 — Central bridge, not direct point-to-point integration
 
-**Alternativa rejeitada**: cada sistema expõe uma API e chama diretamente a
-API do outro.
+**Rejected alternative**: each system exposes an API and calls the other's
+API directly.
 
-**Porquê foi rejeitada**:
-- Acopla os dois sistemas ao contrato um do outro; mudar o schema de um
-  obriga o outro a reagir.
-- Não escala para N sistemas — ligação direta é O(N²) integrações.
-- Sem dono único da correlação, não há sítio central para auditoria,
-  reprocessamento, ou diagnóstico quando uma sincronização falha a meio.
-- Risco de loop de notificação (A atualiza → notifica B → B atualiza →
-  notifica A → ...) sem mecanismo natural de corte.
+**Why it was rejected**:
+- Couples the two systems to each other's contract; changing one's schema
+  forces the other to react.
+- Doesn't scale to N systems — direct integration is O(N²).
+- Without a single owner of correlation, there's no central place for
+  auditing, reprocessing, or diagnosing a sync that fails midway.
+- Risk of a notification loop (A updates → notifies B → B updates →
+  notifies A → ...) with no natural cutoff.
 
-**Decisão tomada**: um serviço-ponte (bridge) neutro, com uma tabela de
-correlação própria (`conversations` / `conversation_participants`) que não
-pertence a nenhum dos sistemas. Isto recria, de forma leve, o papel de "hub
-de verdade" que o OSTicket desempenhava implicitamente — mas agora
-explícito, federado, e independente do número de sistemas envolvidos.
+**Decision made**: a neutral bridge service, with its own correlation
+table (`conversations` / `conversation_participants`) that doesn't belong
+to either system. This lightly recreates the "source-of-truth hub" role
+that OSTicket implicitly played — but now explicit, federated, and
+independent of the number of systems involved.
 
-## Decisão 2 — Outbox pattern em Postgres, não RabbitMQ/Pub-Sub
+## Decision 2 — Outbox pattern on Postgres, not RabbitMQ/Pub-Sub
 
-**Alternativa rejeitada**: fila de mensagens dedicada (RabbitMQ, como usado
-noutros projetos do autor, ou Cloud Pub/Sub).
+**Rejected alternative**: a dedicated message queue (RabbitMQ, as used in
+other projects by the author, or Cloud Pub/Sub).
 
-**Porquê foi rejeitada para este caso específico**:
-- O requisito explícito era "sistema muito leve que possa correr apenas em
-  Cloud Run". RabbitMQ pressupõe um consumidor sempre vivo, o que não
-  combina com Cloud Run a escalar a zero entre picos de tráfego.
-- Um broker externo é mais um componente a operar, atualizar e monitorizar
-  para um volume de eventos que é, por natureza, baixo (mudanças de estado
-  de tickets entre duas equipas, não um pipeline de alto débito).
+**Why it was rejected for this specific case**:
+- The explicit requirement was "a very lightweight system that can run on
+  Cloud Run alone." RabbitMQ assumes an always-on consumer, which doesn't
+  fit Cloud Run scaling to zero between traffic spikes.
+- An external broker is one more component to operate, upgrade, and
+  monitor for an event volume that is, by nature, low (ticket status
+  changes between two teams, not a high-throughput pipeline).
 
-**Decisão tomada**: a tabela `outbox` funciona como fila. A escrita do
-evento de negócio (conversa/participante) e a inserção na fila acontecem na
-**mesma transação Postgres**, eliminando o problema de "dual write" que
-existiria com um broker externo separado da base de dados transacional.
-`SELECT ... FOR UPDATE SKIP LOCKED` garante que múltiplas invocações
-concorrentes do endpoint `/sync` nunca processam a mesma linha duas vezes,
-sem coordenação externa.
+**Decision made**: the `outbox` table works as the queue. Writing the
+business event (conversation/participant) and inserting into the queue
+happen in the **same Postgres transaction**, eliminating the "dual write"
+problem that would exist with a separate external broker. `SELECT ... FOR
+UPDATE SKIP LOCKED` guarantees that multiple concurrent invocations of the
+`/sync` endpoint never process the same row twice, with no external
+coordination.
 
-**Trade-off aceite conscientemente**: latência de sincronização na ordem
-dos minutos (cadência do Cloud Scheduler), não segundos. Para sincronizar
-estado de tickets entre equipas — não para eventos clínicos em tempo real —
-isto é adequado. Se o requisito de latência mudar no futuro, a migração
-natural seria substituir o Cloud Scheduler por Pub/Sub push, mantendo a
-tabela `outbox` como registo de auditoria/replay.
+**Consciously accepted trade-off**: synchronization latency on the order of
+minutes (Cloud Scheduler's cadence), not seconds. For synchronizing ticket
+state between teams — not for real-time clinical events — this is
+adequate. If the latency requirement changes in the future, the natural
+migration would be to replace Cloud Scheduler with Pub/Sub push, keeping
+the `outbox` table as an audit/replay log.
 
-## Decisão 3 — Suporte a N sistemas desde o início, não só A/B
+## Decision 3 — Support for N systems from the start, not just A/B
 
-Quando surgiu a pergunta "e se entrar uma terceira aplicação?", a resposta
-não foi "adicionar mais colunas" mas sim generalizar o modelo:
-- `conversation_participants` é uma tabela associativa (conversa ↔ sistema),
-  não colunas fixas `sistema_a_ref` / `sistema_b_ref`.
-- O fan-out ao inserir na outbox é "todos os participantes da conversa
-  exceto a origem", não "o outro lado do par".
-- A configuração de cada sistema (`systems`) inclui tudo o que é específico
-  dele (URL, autenticação, mapeamento de estados, template de payload), para
-  que adicionar um sistema novo seja uma operação de configuração via
-  frontend, não uma alteração de código.
+When the question "what if a third application shows up?" came up, the
+answer wasn't "add more columns" but to generalize the model:
+- `conversation_participants` is an associative table (conversation ↔
+  system), not fixed `system_a_ref` / `system_b_ref` columns.
+- The outbox fan-out on insert is "every participant of the conversation
+  except the source," not "the other side of the pair."
+- Each system's configuration (`systems`) includes everything specific to
+  it (URL, authentication, status mapping, payload template), so that
+  adding a new system is a configuration operation via the frontend, not a
+  code change.
 
-Custo desta decisão: uma tabela extra e uma FK a mais, praticamente nulo.
-Benefício: evita reescrever o modelo de dados quando aparecer o 3º ou 4º
-sistema — o que, dado o histórico de integrações do autor (Mirth Connect
-ligando múltiplos sistemas clínicos), era uma hipótese realista, não
-hipotética.
+Cost of this decision: one extra table and one extra FK, essentially nil.
+Benefit: avoids rewriting the data model when a 3rd or 4th system shows up
+— which, given the author's integration history (Mirth Connect linking
+multiple clinical systems), was a realistic scenario, not a hypothetical
+one.
 
-## Decisão 4 — Vocabulário de estado interno + mapeamento por sistema
+## Decision 4 — Internal status vocabulary + per-system mapping
 
-Cada sistema externo tem o seu próprio vocabulário de estados (ex: "Aberto"
-vs "NEW"). Em vez de o bridge conhecer todos os vocabulários de todos os
-sistemas em código, cada sistema define um `status_mapping`
-(`{interno: externo}`) na sua configuração. O bridge só conhece o
-vocabulário interno canónico (`novo`, `em_progresso`, `aguarda_terceiros`,
-`resolvido`, `fechado` — ver `status_mapper.py`).
+Each external system has its own status vocabulary (e.g. "Open" vs "NEW").
+Instead of the bridge knowing every vocabulary of every system in code,
+each system defines a `status_mapping` (`{internal: external}`) in its
+configuration. The bridge only knows the canonical internal vocabulary
+(`new`, `in_progress`, `waiting_third_party`, `resolved`, `closed` — see
+`status_mapper.py`).
 
-Isto significa que a lógica de tradução nunca cresce com o número de
-sistemas: cresce a configuração, não o código.
+This means the translation logic never grows with the number of systems:
+the configuration grows, not the code.
 
-## Decisão 5 — Prevenção de loop
+## Decision 5 — Loop prevention
 
-Cada linha da `outbox` regista explicitamente `origem` (quem gerou o
-evento) e `destino` (para quem vai). O fan-out ao processar um evento
-recebido exclui sempre a origem da lista de destinos. Isto por si só evita
-o eco imediato (A→B→A na mesma operação).
+Each `outbox` row explicitly records `source` (who generated the event)
+and `destination` (who it's going to). The fan-out when processing a
+received event always excludes the source from the list of destinations.
+This alone prevents the immediate echo (A→B→A in the same operation).
 
-**Nota para evolução futura**: o esqueleto atual não implementa ainda
-deduplicação de eventos semanticamente idênticos vindos de fontes diferentes
-em janelas curtas de tempo (ex: os dois sistemas atualizam o mesmo campo
-quase em simultâneo). Se isso se tornar um problema real em produção, o
-sítio natural para resolver é `correlation_service.find_or_create_conversation`,
-comparando o `status_local` já guardado com o novo antes de gerar fan-out.
+**Note for future evolution**: the current skeleton does not yet implement
+deduplication of semantically identical events coming from different
+sources within short time windows (e.g. both systems updating the same
+field almost simultaneously). If this becomes a real problem in
+production, the natural place to solve it is
+`correlation_service.find_or_create_conversation`, comparing the already
+stored `local_status` against the new one before generating fan-out.
 
-## Decisão 6 — Sem ORM
+## Decision 6 — No ORM
 
-Interação com a base de dados em SQL explícito via `psycopg3` assíncrono,
-não SQLAlchemy nem outro ORM. Com 6 tabelas e queries relativamente simples,
-um ORM acrescentaria uma camada de abstração sem benefício real, e a lógica
-de concorrência (`FOR UPDATE SKIP LOCKED`) é mais direta de escrever e
-raciocinar em SQL puro do que através de abstrações de ORM.
+Database interaction uses explicit SQL via asynchronous `psycopg3`, not
+SQLAlchemy or another ORM. With 6 tables and relatively simple queries, an
+ORM would add a layer of abstraction with no real benefit, and the
+concurrency logic (`FOR UPDATE SKIP LOCKED`) is more direct to write and
+reason about in plain SQL than through ORM abstractions.
 
-## Decisão 7 — Frontend sem framework
+## Decision 7 — Frameworkless frontend
 
-O frontend de configuração/auditoria é HTML + CSS + JavaScript vanilla,
-servido como ficheiros estáticos pelo próprio FastAPI (`StaticFiles`). Não
-há build step (webpack/vite/etc.). Justificação: este é um painel
-administrativo interno de baixo tráfego, não uma aplicação de utilizador
-final — o custo de manutenção de um pipeline de build não se justifica face
-ao ganho.
+The configuration/audit frontend is vanilla HTML + CSS + JavaScript,
+served as static files by FastAPI itself (`StaticFiles`). There is no
+build step (webpack/vite/etc.). Rationale: this is a low-traffic internal
+admin panel, not an end-user application — the maintenance cost of a build
+pipeline isn't justified by the gain.
 
-## O que este esqueleto assume e deixa por decidir
+## What this skeleton assumes and leaves undecided
 
-- **Autenticação humana ao frontend**: o código não implementa login;
-  assume-se IAP ou proxy de autenticação à frente do Cloud Run (ver
-  README.md secção 5). Decisão adiada deliberadamente — depende de como a
-  organização já gere acesso a ferramentas internas.
-- **Reconciliação de conflitos de campo** (quem "ganha" quando os dois
-  sistemas escrevem o mesmo campo quase em simultâneo): não implementado.
-  O esqueleto assume que cada sistema é autoritativo sobre o seu próprio
-  `status_local`, e o `status_geral` da conversa é informativo, não uma
-  fonte de verdade normativa. Se for necessário um dono de campo explícito
-  por direção (como discutido inicialmente), o sítio a estender é
-  `correlation_service.py`.
-- **Alertas de falha** (ex: Telegram, como usado noutros projetos do autor):
-  não implementado neste esqueleto; o sítio natural é dentro de
-  `outbox_service.mark_failed`, quando uma entrada atinge `max_tentativas`.
+- **Human authentication for the frontend**: the code does not implement
+  login; it assumes IAP or an authentication proxy in front of Cloud Run
+  (see README.md, section 5). Deliberately deferred decision — it depends
+  on how the organization already manages access to internal tools.
+- **Field-conflict reconciliation** (who "wins" when both systems write the
+  same field almost simultaneously): not implemented. The skeleton assumes
+  each system is authoritative over its own `local_status`, and a
+  conversation's `overall_status` is informational, not a normative source
+  of truth. If an explicit per-direction field owner is needed (as
+  initially discussed), the place to extend is `correlation_service.py`.
+- **Failure alerts** (e.g. Telegram, as used in other projects by the
+  author): not implemented in this skeleton; the natural place is inside
+  `outbox_service.mark_failed`, when an entry reaches `max_attempts`.
 
-## Convenções do código
+## Code conventions
 
-- Identificadores (nomes de funções, variáveis, tabelas, colunas) em
-  inglês/neutro técnico; comentários, docstrings e texto orientado ao
-  utilizador (frontend, mensagens de erro) em português europeu (pt-PT).
-- Cada ficheiro `.py` tem um docstring de módulo no topo a explicar a sua
-  responsabilidade — ler esses docstrings é a forma mais rápida de navegar
-  o projeto pela primeira vez.
-- `app/services/` contém lógica de negócio pura, sem dependência de FastAPI;
-  `app/api/` contém só orquestração HTTP fina sobre os serviços.
+- Identifiers (function, variable, table, column names), comments,
+  docstrings, and user-facing text (frontend, error messages) are all in
+  English.
+- Each `.py` file has a module docstring at the top explaining its
+  responsibility — reading those docstrings is the fastest way to
+  navigate the project for the first time.
+- `app/services/` holds pure business logic, with no dependency on
+  FastAPI; `app/api/` holds thin HTTP orchestration on top of the
+  services.

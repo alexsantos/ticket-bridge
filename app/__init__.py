@@ -2,15 +2,15 @@
 Ticket Bridge
 =============
 
-Serviço leve de correlação de tickets entre N aplicações de suporte,
-desenhado para substituir a função de "hub central" que o OSTicket
-desempenhava implicitamente.
+Lightweight ticket correlation service across N support applications,
+designed to replace the "central hub" role that OSTicket used to play
+implicitly.
 
-Arquitetura (ver CLAUDE.md para o racional completo):
-    - FastAPI stateless, corre em Cloud Run (escala a zero).
-    - PostgreSQL (Cloud SQL) como única fonte de verdade e fila
-      transacional (outbox pattern) - sem RabbitMQ/Pub-Sub.
-    - Cloud Scheduler dispara periodicamente o endpoint de sync que
-      processa a outbox e entrega eventos pendentes a cada sistema.
-    - Suporta fan-out para N sistemas por conversa (não apenas um par A/B).
+Architecture (see CLAUDE.md for the full rationale):
+    - Stateless FastAPI, runs on Cloud Run (scales to zero).
+    - PostgreSQL (Cloud SQL) as the single source of truth and transactional
+      queue (outbox pattern) - no RabbitMQ/Pub-Sub.
+    - Cloud Scheduler periodically triggers the sync endpoint that
+      processes the outbox and delivers pending events to each system.
+    - Supports fan-out to N systems per conversation (not just an A/B pair).
 """

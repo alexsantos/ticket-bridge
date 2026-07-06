@@ -1,20 +1,21 @@
 """
 outbox_service.py
 ------------------
-Implementa o outbox pattern: em vez de um broker externo (RabbitMQ /
-Pub-Sub), usamos a própria tabela `outbox` no Postgres como fila.
+Implements the outbox pattern: instead of an external broker (RabbitMQ /
+Pub-Sub), we use the `outbox` table itself in Postgres as the queue.
 
-Porquê isto e não RabbitMQ (ver também CLAUDE.md):
-  - Cloud Run escala a zero; um consumidor RabbitMQ tem de estar sempre
-    vivo, o que contraria esse modelo.
-  - A escrita do evento de negócio e a inserção na fila acontecem na MESMA
-    transação Postgres - não há risco de "gravei a conversa mas perdi o
-    evento" (dual-write problem).
-  - `FOR UPDATE SKIP LOCKED` dá concorrência seguíssima entre invocações
-    concorrentes do /sync sem precisar de coordenação externa.
+Why this and not RabbitMQ (see also CLAUDE.md):
+  - Cloud Run scales to zero; a RabbitMQ consumer needs to be always
+    running, which conflicts with that model.
+  - Writing the business event and inserting it into the queue happen in
+    the SAME Postgres transaction - there's no risk of "I saved the
+    conversation but lost the event" (the dual-write problem).
+  - `FOR UPDATE SKIP LOCKED` gives safe concurrency across concurrent
+    /sync invocations without needing external coordination.
 
-Trade-off aceite: latência de minutos (cadência do Cloud Scheduler), não
-segundos. Para sincronizar estado de tickets entre equipas, isto é adequado.
+Accepted trade-off: latency in the order of minutes (Cloud Scheduler's
+cadence), not seconds. For synchronizing ticket state between teams, this
+is adequate.
 """
 from typing import Any
 from uuid import UUID
@@ -26,22 +27,22 @@ async def enqueue(
     conn: AsyncConnection,
     *,
     conversation_id: UUID,
-    destino: str,
-    origem: str,
+    destination: str,
+    source: str,
     payload: dict[str, Any],
 ) -> int:
-    """Insere uma nova entrada pendente na outbox. Devolve o id criado."""
+    """Inserts a new pending entry into the outbox. Returns the created id."""
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO outbox (conversation_id, destino, origem, payload, status)
-            VALUES (%(cid)s, %(destino)s, %(origem)s, %(payload)s, 'pending')
+            INSERT INTO outbox (conversation_id, destination, source, payload, status)
+            VALUES (%(cid)s, %(destination)s, %(source)s, %(payload)s, 'pending')
             RETURNING id
             """,
             {
                 "cid": conversation_id,
-                "destino": destino,
-                "origem": origem,
+                "destination": destination,
+                "source": source,
                 "payload": payload,
             },
         )
@@ -51,19 +52,19 @@ async def enqueue(
 
 async def fetch_pending_batch(conn: AsyncConnection, *, limit: int) -> list[dict[str, Any]]:
     """
-    Reserva um lote de linhas pendentes para processamento nesta invocação,
-    usando SKIP LOCKED para que invocações concorrentes do /sync nunca
-    peguem na mesma linha.
+    Reserves a batch of pending rows for processing in this invocation,
+    using SKIP LOCKED so that concurrent /sync invocations never grab the
+    same row.
 
-    Nota: isto corre DENTRO de uma transação que o chamador deve manter
-    aberta até marcar as linhas como sent/failed (ver dispatcher.py).
+    Note: this runs INSIDE a transaction that the caller must keep open
+    until the rows are marked sent/failed (see dispatcher.py).
     """
     async with conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT id, conversation_id, destino, origem, payload, tentativas, max_tentativas
+            SELECT id, conversation_id, destination, source, payload, attempts, max_attempts
             FROM outbox
-            WHERE status = 'pending' AND tentativas < max_tentativas
+            WHERE status = 'pending' AND attempts < max_attempts
             ORDER BY id
             FOR UPDATE SKIP LOCKED
             LIMIT %(limit)s
@@ -85,23 +86,24 @@ async def mark_sent(conn: AsyncConnection, *, outbox_id: int) -> None:
         )
 
 
-async def mark_failed(conn: AsyncConnection, *, outbox_id: int, erro: str) -> None:
+async def mark_failed(conn: AsyncConnection, *, outbox_id: int, error: str) -> None:
     """
-    Regista uma tentativa falhada. Se atingir max_tentativas, o status passa
-    a 'failed' (para intervenção manual visível no frontend de auditoria);
-    caso contrário mantém-se 'pending' para nova tentativa no próximo /sync.
+    Records a failed attempt. If max_attempts is reached, the status
+    becomes 'failed' (for manual intervention, visible in the audit
+    frontend); otherwise it stays 'pending' for another attempt on the next
+    /sync.
     """
     async with conn.cursor() as cur:
         await cur.execute(
             """
             UPDATE outbox
-            SET tentativas = tentativas + 1,
-                last_error = %(erro)s,
+            SET attempts = attempts + 1,
+                last_error = %(error)s,
                 status = CASE
-                    WHEN tentativas + 1 >= max_tentativas THEN 'failed'
+                    WHEN attempts + 1 >= max_attempts THEN 'failed'
                     ELSE 'pending'
                 END
             WHERE id = %(id)s
             """,
-            {"id": outbox_id, "erro": erro[:2000]},
+            {"id": outbox_id, "error": error[:2000]},
         )

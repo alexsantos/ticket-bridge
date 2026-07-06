@@ -1,8 +1,8 @@
 """
 audit.py
 --------
-GET /api/v1/audit - consulta do registo de auditoria, com filtros opcionais
-por conversa e por sistema. Alimenta o separador "Auditoria" do frontend.
+GET /api/v1/audit - queries the audit trail, with optional filters by
+conversation and by system. Feeds the frontend's "Audit" tab.
 """
 from uuid import UUID
 
@@ -19,10 +19,10 @@ router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 async def get_audit_log(
     limit: int = Query(default=100, le=500),
     conversation_id: UUID | None = None,
-    sistema: str | None = None,
+    system_code: str | None = None,
 ) -> list[AuditLogOut]:
     async with get_connection() as conn:
         rows = await list_recent(
-            conn, limit=limit, conversation_id=conversation_id, sistema=sistema
+            conn, limit=limit, conversation_id=conversation_id, system_code=system_code
         )
     return [AuditLogOut(**row) for row in rows]

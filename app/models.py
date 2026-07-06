@@ -1,13 +1,13 @@
 """
 models.py
 ---------
-Modelos de domínio (Pydantic) que espelham as tabelas principais da base de
-dados. Usados internamente pelos serviços; distintos dos schemas de API
-(schemas.py), que definem os contratos de entrada/saída dos endpoints.
+Domain models (Pydantic) that mirror the main database tables. Used
+internally by the services; distinct from the API schemas (schemas.py),
+which define the input/output contracts of the endpoints.
 
-Mantemos esta separação porque o modelo de domínio pode ter campos internos
-(ex: last_error da outbox) que não fazem sentido expor tal e qual na API
-pública de configuração.
+We keep this separation because the domain model can have internal fields
+(e.g. the outbox's last_error) that don't make sense to expose as-is in the
+public configuration API.
 """
 from datetime import datetime
 from typing import Any, Literal
@@ -17,8 +17,8 @@ from pydantic import BaseModel
 
 
 class System(BaseModel):
-    codigo: str
-    nome: str
+    code: str
+    name: str
     base_url: str
     auth_type: Literal["api_key", "bearer", "basic"]
     auth_config: dict[str, Any]
@@ -31,17 +31,17 @@ class System(BaseModel):
 
 class ConversationParticipant(BaseModel):
     conversation_id: UUID
-    sistema: str
-    ref_externa: str
-    status_local: str | None
+    system_code: str
+    external_ref: str
+    local_status: str | None
     joined_at: datetime
     updated_at: datetime
 
 
 class Conversation(BaseModel):
     conversation_id: UUID
-    assunto: str | None
-    status_geral: str
+    subject: str | None
+    overall_status: str
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -51,12 +51,12 @@ class Conversation(BaseModel):
 class OutboxEntry(BaseModel):
     id: int
     conversation_id: UUID
-    destino: str
-    origem: str
+    destination: str
+    source: str
     payload: dict[str, Any]
     status: Literal["pending", "sent", "failed"]
-    tentativas: int
-    max_tentativas: int
+    attempts: int
+    max_attempts: int
     last_error: str | None
     created_at: datetime
     processed_at: datetime | None
@@ -65,7 +65,7 @@ class OutboxEntry(BaseModel):
 class AuditLogEntry(BaseModel):
     id: int
     conversation_id: UUID | None
-    sistema: str | None
-    evento_tipo: str
-    detalhe: dict[str, Any]
+    system_code: str | None
+    event_type: str
+    detail: dict[str, Any]
     created_at: datetime

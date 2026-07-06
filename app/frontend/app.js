@@ -1,19 +1,21 @@
 /**
  * app.js
  * ------
- * JavaScript vanilla (sem framework/build step) que consome a API REST do
- * Ticket Bridge e popula os três separadores: Sistemas, Conversas, Auditoria.
+ * Vanilla JavaScript (no framework/build step) that consumes the Ticket
+ * Bridge REST API and populates the three tabs: Systems, Conversations,
+ * Audit.
  *
- * Nota: estes endpoints (/api/v1/systems, /api/v1/conversations,
- * /api/v1/audit) assumem-se protegidos por IAM do Cloud Run ou por um
- * proxy de autenticação à frente do serviço - este ficheiro não implementa
- * login. Ver README.md secção "Segurança do frontend de configuração".
+ * Note: these endpoints (/api/v1/systems, /api/v1/conversations,
+ * /api/v1/audit) are assumed to be protected by Cloud Run IAM or by an
+ * authentication proxy in front of the service - this file does not
+ * implement login. See README.md, "Configuration frontend security"
+ * section.
  */
 
 const API_BASE = "/api/v1";
 
 // ---------------------------------------------------------------------------
-// Navegação entre separadores
+// Tab navigation
 // ---------------------------------------------------------------------------
 document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -25,182 +27,182 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 });
 
 // ---------------------------------------------------------------------------
-// Sistemas
+// Systems
 // ---------------------------------------------------------------------------
-async function carregarSistemas() {
+async function loadSystems() {
     const resp = await fetch(`${API_BASE}/systems`);
-    const sistemas = await resp.json();
+    const systems = await resp.json();
 
-    const tbody = document.querySelector("#tabela-sistemas tbody");
+    const tbody = document.querySelector("#table-systems tbody");
     tbody.innerHTML = "";
     const selects = [
-        document.getElementById("filtro-conversas-sistema"),
-        document.getElementById("filtro-auditoria-sistema"),
+        document.getElementById("filter-conversations-system"),
+        document.getElementById("filter-audit-system"),
     ];
     selects.forEach((sel) => {
         while (sel.options.length > 1) sel.remove(1);
     });
 
-    for (const s of sistemas) {
+    for (const s of systems) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td><code>${s.codigo}</code></td>
-            <td>${s.nome}</td>
+            <td><code>${s.code}</code></td>
+            <td>${s.name}</td>
             <td>${s.base_url}</td>
             <td>${s.auth_type}</td>
-            <td><span class="badge ${s.active ? "ativo" : "inativo"}">${s.active ? "Ativo" : "Inativo"}</span></td>
-            <td>${formatarData(s.updated_at)}</td>
+            <td><span class="badge ${s.active ? "active" : "inactive"}">${s.active ? "Active" : "Inactive"}</span></td>
+            <td>${formatDate(s.updated_at)}</td>
         `;
         tr.style.cursor = "pointer";
-        tr.addEventListener("click", () => abrirDialogSistema(s));
+        tr.addEventListener("click", () => openSystemDialog(s));
         tbody.appendChild(tr);
 
         selects.forEach((sel) => {
             const opt = document.createElement("option");
-            opt.value = s.codigo;
-            opt.textContent = s.nome;
+            opt.value = s.code;
+            opt.textContent = s.name;
             sel.appendChild(opt);
         });
     }
 }
 
-const dialogSistema = document.getElementById("dialog-sistema");
-const formSistema = document.getElementById("form-sistema");
-let codigoEmEdicao = null;
+const systemDialog = document.getElementById("dialog-system");
+const systemForm = document.getElementById("form-system");
+let codeBeingEdited = null;
 
-document.getElementById("btn-novo-sistema").addEventListener("click", () => abrirDialogSistema(null));
-document.getElementById("btn-cancelar-sistema").addEventListener("click", () => dialogSistema.close());
+document.getElementById("btn-new-system").addEventListener("click", () => openSystemDialog(null));
+document.getElementById("btn-cancel-system").addEventListener("click", () => systemDialog.close());
 
-function abrirDialogSistema(sistema) {
-    formSistema.reset();
-    codigoEmEdicao = sistema ? sistema.codigo : null;
-    formSistema.codigo.disabled = !!sistema;
+function openSystemDialog(system) {
+    systemForm.reset();
+    codeBeingEdited = system ? system.code : null;
+    systemForm.code.disabled = !!system;
 
-    if (sistema) {
-        formSistema.codigo.value = sistema.codigo;
-        formSistema.nome.value = sistema.nome;
-        formSistema.base_url.value = sistema.base_url;
-        formSistema.auth_type.value = sistema.auth_type;
-        formSistema.status_mapping.value = JSON.stringify(sistema.status_mapping || {}, null, 2);
-        formSistema.active.checked = sistema.active;
+    if (system) {
+        systemForm.code.value = system.code;
+        systemForm.name.value = system.name;
+        systemForm.base_url.value = system.base_url;
+        systemForm.auth_type.value = system.auth_type;
+        systemForm.status_mapping.value = JSON.stringify(system.status_mapping || {}, null, 2);
+        systemForm.active.checked = system.active;
     }
-    dialogSistema.showModal();
+    systemDialog.showModal();
 }
 
-formSistema.addEventListener("submit", async (ev) => {
-    const dados = new FormData(formSistema);
+systemForm.addEventListener("submit", async (ev) => {
+    const data = new FormData(systemForm);
     let statusMapping = {};
     let payloadTemplate = {};
     try {
-        statusMapping = dados.get("status_mapping") ? JSON.parse(dados.get("status_mapping")) : {};
-        payloadTemplate = dados.get("payload_template") ? JSON.parse(dados.get("payload_template")) : {};
+        statusMapping = data.get("status_mapping") ? JSON.parse(data.get("status_mapping")) : {};
+        payloadTemplate = data.get("payload_template") ? JSON.parse(data.get("payload_template")) : {};
     } catch (e) {
-        alert("JSON inválido em mapeamento de estados ou template de payload.");
+        alert("Invalid JSON in status mapping or payload template.");
         ev.preventDefault();
         return;
     }
 
-    const corpo = {
-        nome: dados.get("nome"),
-        base_url: dados.get("base_url"),
-        auth_type: dados.get("auth_type"),
-        auth_config: { secret_ref: dados.get("secret_ref") || null },
+    const body = {
+        name: data.get("name"),
+        base_url: data.get("base_url"),
+        auth_type: data.get("auth_type"),
+        auth_config: { secret_ref: data.get("secret_ref") || null },
         status_mapping: statusMapping,
         payload_template: payloadTemplate,
-        active: formSistema.active.checked,
+        active: systemForm.active.checked,
     };
 
-    if (codigoEmEdicao) {
-        await fetch(`${API_BASE}/systems/${codigoEmEdicao}`, {
+    if (codeBeingEdited) {
+        await fetch(`${API_BASE}/systems/${codeBeingEdited}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(corpo),
+            body: JSON.stringify(body),
         });
     } else {
-        corpo.codigo = dados.get("codigo");
+        body.code = data.get("code");
         await fetch(`${API_BASE}/systems`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(corpo),
+            body: JSON.stringify(body),
         });
     }
-    await carregarSistemas();
+    await loadSystems();
 });
 
 // ---------------------------------------------------------------------------
-// Conversas
+// Conversations
 // ---------------------------------------------------------------------------
-async function carregarConversas() {
-    const sistema = document.getElementById("filtro-conversas-sistema").value;
-    const qs = sistema ? `?sistema=${encodeURIComponent(sistema)}` : "";
+async function loadConversations() {
+    const systemCode = document.getElementById("filter-conversations-system").value;
+    const qs = systemCode ? `?system_code=${encodeURIComponent(systemCode)}` : "";
     const resp = await fetch(`${API_BASE}/conversations${qs}`);
-    const conversas = await resp.json();
+    const conversations = await resp.json();
 
-    const tbody = document.querySelector("#tabela-conversas tbody");
+    const tbody = document.querySelector("#table-conversations tbody");
     tbody.innerHTML = "";
-    for (const c of conversas) {
-        const participantes = c.participants
-            .map((p) => `${p.sistema}: <code>${p.ref_externa}</code> (${p.status_local ?? "—"})`)
+    for (const c of conversations) {
+        const participants = c.participants
+            .map((p) => `${p.system_code}: <code>${p.external_ref}</code> (${p.local_status ?? "—"})`)
             .join("<br>");
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td><code>${c.conversation_id.slice(0, 8)}…</code></td>
-            <td>${c.assunto ?? "—"}</td>
-            <td>${c.status_geral}</td>
-            <td>${participantes}</td>
-            <td>${formatarData(c.updated_at)}</td>
+            <td>${c.subject ?? "—"}</td>
+            <td>${c.overall_status}</td>
+            <td>${participants}</td>
+            <td>${formatDate(c.updated_at)}</td>
         `;
         tbody.appendChild(tr);
     }
 }
 
-document.getElementById("filtro-conversas-sistema").addEventListener("change", carregarConversas);
+document.getElementById("filter-conversations-system").addEventListener("change", loadConversations);
 
 // ---------------------------------------------------------------------------
-// Auditoria
+// Audit
 // ---------------------------------------------------------------------------
-async function carregarAuditoria() {
-    const sistema = document.getElementById("filtro-auditoria-sistema").value;
-    const qs = sistema ? `?sistema=${encodeURIComponent(sistema)}` : "";
+async function loadAudit() {
+    const systemCode = document.getElementById("filter-audit-system").value;
+    const qs = systemCode ? `?system_code=${encodeURIComponent(systemCode)}` : "";
     const resp = await fetch(`${API_BASE}/audit${qs}`);
-    const registos = await resp.json();
+    const entries = await resp.json();
 
-    const tbody = document.querySelector("#tabela-auditoria tbody");
+    const tbody = document.querySelector("#table-audit tbody");
     tbody.innerHTML = "";
-    for (const r of registos) {
+    for (const r of entries) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td>${formatarData(r.created_at)}</td>
-            <td>${r.evento_tipo}</td>
-            <td>${r.sistema ?? "—"}</td>
+            <td>${formatDate(r.created_at)}</td>
+            <td>${r.event_type}</td>
+            <td>${r.system_code ?? "—"}</td>
             <td>${r.conversation_id ? r.conversation_id.slice(0, 8) + "…" : "—"}</td>
-            <td><code>${JSON.stringify(r.detalhe)}</code></td>
+            <td><code>${JSON.stringify(r.detail)}</code></td>
         `;
         tbody.appendChild(tr);
     }
 }
 
-document.getElementById("filtro-auditoria-sistema").addEventListener("change", carregarAuditoria);
+document.getElementById("filter-audit-system").addEventListener("change", loadAudit);
 
 // ---------------------------------------------------------------------------
-// Utilitários
+// Utilities
 // ---------------------------------------------------------------------------
-function formatarData(iso) {
-    return new Date(iso).toLocaleString("pt-PT");
+function formatDate(iso) {
+    return new Date(iso).toLocaleString("en-GB");
 }
 
 // ---------------------------------------------------------------------------
-// Arranque
+// Startup
 // ---------------------------------------------------------------------------
-(async function iniciar() {
-    const statusEl = document.getElementById("status-conexao");
+(async function start() {
+    const statusEl = document.getElementById("connection-status");
     try {
         await fetch("/health").then((r) => r.json());
-        statusEl.textContent = "Ligado ao serviço.";
-        await carregarSistemas();
-        await carregarConversas();
-        await carregarAuditoria();
+        statusEl.textContent = "Connected to the service.";
+        await loadSystems();
+        await loadConversations();
+        await loadAudit();
     } catch (e) {
-        statusEl.textContent = "Não foi possível contactar o serviço.";
+        statusEl.textContent = "Could not reach the service.";
     }
 })();

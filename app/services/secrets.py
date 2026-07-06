@@ -1,19 +1,19 @@
 """
 secrets.py
 ----------
-Resolve referências a segredos (`auth_config['secret_ref']`) para o valor
-real, sem que o resto do código precise de saber de onde vêm.
+Resolves secret references (`auth_config['secret_ref']`) to their real
+value, without the rest of the code needing to know where they come from.
 
-Em produção (GCP): o valor é lido do Secret Manager, com cache em memória
-por processo (o processo Cloud Run é recriado com frequência, pelo que o
-cache nunca fica desatualizado por muito tempo).
+In production (GCP): the value is read from Secret Manager, with an
+in-memory cache per process (the Cloud Run process is recreated often, so
+the cache never stays stale for long).
 
-Em desenvolvimento local: cai para uma variável de ambiente com o mesmo
-nome do secret_ref, para não obrigar a ter Secret Manager disponível
-localmente.
+In local development: falls back to an environment variable with the same
+name as the secret_ref, so Secret Manager doesn't need to be available
+locally.
 
-Ver README.md secção "Segredos" para instruções de criação dos segredos
-no Secret Manager e concessão de acesso à service account do Cloud Run.
+See README.md, section "Secrets", for instructions on creating secrets in
+Secret Manager and granting access to the Cloud Run service account.
 """
 import logging
 import os
@@ -29,7 +29,7 @@ _secret_manager_client = None
 def _get_secret_manager_client():
     global _secret_manager_client
     if _secret_manager_client is None:
-        from google.cloud import secretmanager  # import tardio - dependência opcional localmente
+        from google.cloud import secretmanager  # lazy import - optional dependency locally
         _secret_manager_client = secretmanager.SecretManagerServiceClient()
     return _secret_manager_client
 
@@ -37,23 +37,23 @@ def _get_secret_manager_client():
 @lru_cache(maxsize=64)
 def resolve_secret(secret_ref: str) -> str | None:
     """
-    Resolve um secret_ref para o seu valor.
+    Resolves a secret_ref to its value.
 
-    - environment == 'local': lê de os.environ[secret_ref].
-    - caso contrário: lê a versão 'latest' do segredo homónimo no Secret
-      Manager do projeto GCP corrente (GOOGLE_CLOUD_PROJECT).
+    - environment == 'local': reads from os.environ[secret_ref].
+    - otherwise: reads the 'latest' version of the matching secret in the
+      current GCP project's Secret Manager (GOOGLE_CLOUD_PROJECT).
     """
     settings = get_settings()
 
     if settings.environment == "local":
         value = os.environ.get(secret_ref)
         if value is None:
-            logger.warning("Segredo '%s' não encontrado nas variáveis de ambiente locais.", secret_ref)
+            logger.warning("Secret '%s' not found in local environment variables.", secret_ref)
         return value
 
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
     if not project_id:
-        logger.error("GOOGLE_CLOUD_PROJECT não definido - não é possível resolver segredos.")
+        logger.error("GOOGLE_CLOUD_PROJECT not set - cannot resolve secrets.")
         return None
 
     try:
@@ -62,5 +62,5 @@ def resolve_secret(secret_ref: str) -> str | None:
         response = client.access_secret_version(request={"name": name})
         return response.payload.data.decode("utf-8")
     except Exception:
-        logger.exception("Falha ao resolver segredo '%s' via Secret Manager.", secret_ref)
+        logger.exception("Failed to resolve secret '%s' via Secret Manager.", secret_ref)
         return None
