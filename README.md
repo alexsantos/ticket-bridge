@@ -173,6 +173,11 @@ psql "postgresql://localhost/ticketbridge" -c "SELECT id, destination, status FR
 # to - e.g. creating under "SALES" as "system_a" (not subscribed) returns 403.
 ```
 
+For a full walkthrough of this scenario in both directions (including a
+live-delivery demo that lets you watch the real fan-out payload arrive
+over HTTP instead of just reading about it), see
+[`examples/README.md`](examples/README.md).
+
 To run the automated tests:
 ```bash
 uv run pytest tests/ -v
