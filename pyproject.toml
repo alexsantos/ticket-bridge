@@ -1,22 +1,22 @@
 [project]
 name = "ticket-bridge"
-version = "1.0.0"
+version = "0.1.0"
 description = "Ticket correlation service across multiple support applications."
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.115.0",
-    "uvicorn[standard]==0.30.6",
-    "pydantic==2.9.2",
-    "pydantic-settings==2.5.2",
-    "psycopg[binary,pool]==3.2.2",
-    "httpx==0.27.2",
-    "google-cloud-secret-manager==2.20.2",
-    "python-multipart==0.0.9",
+    "fastapi==0.139.0",
+    "uvicorn[standard]==0.50.2",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "psycopg[binary,pool]==3.3.4",
+    "httpx==0.28.1",
+    "google-cloud-secret-manager==2.29.0",
+    "python-multipart==0.0.32",
     "apscheduler==3.11.3",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest==8.3.3",
-    "pytest-asyncio==0.24.0",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
 ]

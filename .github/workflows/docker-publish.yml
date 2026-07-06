@@ -3,7 +3,7 @@ name: Publish Docker image
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
 
 jobs:
   test:
@@ -36,6 +36,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Validate tag matches pyproject.toml version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PYPROJECT_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ "$PYPROJECT_VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match pyproject.toml version '$PYPROJECT_VERSION'."
+            exit 1
+          fi
+          echo "Tag matches pyproject.toml version: $GITHUB_REF_NAME"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -65,3 +75,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  create-release:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            Docker image: `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`

@@ -435,12 +435,13 @@ Two GitHub Actions workflows live in `.github/workflows/`:
   and on every pull request targeting `main`. This is the "Tests" badge at
   the top of this file.
 - **`docker-publish.yml`** — on every push to `main` (and on tags matching
-  `v*.*.*`), runs the test suite again as a gate, then builds the image
-  from the `Dockerfile` and pushes it to the
+  `X.Y.Z`, no `v` prefix), runs the test suite again as a gate, then builds
+  the image from the `Dockerfile` and pushes it to the
   [GitHub Container Registry](https://github.com/alexsantos/ticket-bridge/pkgs/container/ticket-bridge)
   (`ghcr.io/alexsantos/ticket-bridge`). Pushes to `main` are tagged
   `latest` and with the commit SHA; version tags additionally get a
   semver tag. This is the "Docker image" badge at the top of this file.
+  On a tag push, it also creates a GitHub Release (see below).
 
 Both workflows authenticate with the repository's built-in `GITHUB_TOKEN` -
 no extra secrets need to be configured. The GHCR package's visibility
@@ -452,6 +453,27 @@ To deploy a published image to Cloud Run instead of building it locally
 `--image=ghcr.io/alexsantos/ticket-bridge:latest`; Cloud Run can pull from
 GHCR directly if the package is public, or via a registry credential if
 it's kept private.
+
+### 7.1. Cutting a release
+
+`pyproject.toml`'s `version` field is the single source of truth - the
+git tag must match it exactly (no `v` prefix), or the workflow fails
+before building or releasing anything:
+
+```bash
+# 1. Bump the version in pyproject.toml, then commit it
+git commit -am "Bump version to 0.2.0"
+
+# 2. Tag with the exact same version and push the tag
+git tag 0.2.0
+git push origin main --tags
+```
+
+This triggers `docker-publish.yml`'s tag path: tests → validate the tag
+matches `pyproject.toml` → build and push `ghcr.io/alexsantos/ticket-bridge:0.2.0`
+(and `:latest`) → create a GitHub Release named `0.2.0` with
+auto-generated notes (the commit list since the previous tag) and a link
+to the published image.
 
 ---
 
