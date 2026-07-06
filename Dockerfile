@@ -1,9 +1,15 @@
 # Dockerfile
 # ----------
-# Image for deployment on Cloud Run. A multi-stage build isn't needed here -
+# Runs anywhere a container can - a plain VM, Cloud Run, etc. (see
+# README.md sections 3.5 and 4). A multi-stage build isn't needed here -
 # the dependencies are lightweight (FastAPI + psycopg + httpx), so we keep
 # a single stage for simplicity. Dependencies are installed with uv from
 # the committed uv.lock, for fast and reproducible builds.
+#
+# The app's own in-process scheduler (app/scheduler.py) triggers outbox
+# sync automatically once the container is running - no external cron or
+# pinger needed, unless SYNC_SCHEDULER_ENABLED=false (e.g. on Cloud Run,
+# see README.md section 4.6).
 
 FROM python:3.12-slim
 

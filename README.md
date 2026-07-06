@@ -22,27 +22,35 @@ See **`CLAUDE.md`** for the full rationale behind the architecture decisions.
 ## 1. Architecture overview
 
 ```
-System A ──POST /api/v1/events──▶ ┌────────────────────┐
-                                    │   Ticket Bridge     │
-System B ──POST /api/v1/events──▶ │  (Cloud Run, FastAPI)│
-                                    │                      │
-System C ──POST /api/v1/events──▶ │  PostgreSQL:         │
-                                    │   - conversations     │
-                                    │   - participants       │
-            ◀── outbox (HTTP) ──── │   - topics + subscriptions│
-                                    │   - outbox (queue)          │
-                                    │   - audit_log                 │
+System A ──POST /api/v1/events──▶ ┌──────────────────────┐
+                                    │   Ticket Bridge       │
+System B ──POST /api/v1/events──▶ │  (FastAPI, any host    │
+                                    │   that runs it         │
+System C ──POST /api/v1/events──▶ │   continuously)          │
+                                    │                           │
+            ◀── outbox (HTTP) ──── │  PostgreSQL:               │
+                                    │   - conversations           │
+                                    │   - participants              │
+                                    │   - topics + subscriptions      │
+                                    │   - outbox (queue)                │
+                                    │   - audit_log                       │
                                     └──────────┬───────────┘
                                                │
-                                     Cloud Scheduler
-                                     (triggers /api/v1/sync
-                                      every 1-2 min)
+                                     in-process scheduler
+                                     (app/scheduler.py, triggers
+                                      sync every 1-2 min by default -
+                                      see section 3.4)
 ```
 
 - **No external broker** (RabbitMQ/Pub-Sub): the queue is a Postgres table
   (`outbox`), processed with `SELECT ... FOR UPDATE SKIP LOCKED`.
-- **Stateless**: any Cloud Run instance can process any request; all state
-  lives in the database.
+- **Stateless**: any instance can process any request; all state lives in
+  the database.
+- **No external pinger required**: an in-process scheduler
+  (`app/scheduler.py`) triggers outbox processing automatically on a fixed
+  interval - see section 3.4. `POST /api/v1/sync` still exists as a manual
+  trigger, and as the integration point for an external scheduler (e.g.
+  Cloud Scheduler) if this ever runs on something that scales to zero.
 - **N systems, not just 2**: `conversation_participants` allows associating
   as many systems as needed with the same conversation.
 - **Topic-driven, proactive fan-out**: every conversation belongs to exactly
@@ -61,12 +69,13 @@ ticket-bridge/
 │   ├── main.py                  # app startup, routers, health check
 │   ├── config.py                # configuration via environment variables
 │   ├── database.py              # Postgres connection pool (psycopg3)
+│   ├── scheduler.py              # in-process periodic outbox-sync trigger (APScheduler)
 │   ├── models.py                # internal domain models
 │   ├── schemas.py                # API request/response contracts
-│   ├── security.py              # authentication (API keys, scheduler secret)
+│   ├── security.py              # authentication (API keys, sync trigger secret)
 │   ├── api/
 │   │   ├── events.py            # POST /api/v1/events   (inbound)
-│   │   ├── sync.py              # POST /api/v1/sync     (processes outbox)
+│   │   ├── sync.py              # POST /api/v1/sync     (manual/on-demand outbox trigger)
 │   │   ├── systems.py           # CRUD /api/v1/systems  (configuration + topic subscriptions)
 │   │   ├── topics.py            # CRUD /api/v1/topics   (ticket categories, e.g. INFRA/SPM/SALES)
 │   │   ├── conversations.py     # GET  /api/v1/conversations
@@ -75,6 +84,7 @@ ticket-bridge/
 │   │   ├── correlation_service.py  # conversation/participant management + fan-out resolution
 │   │   ├── status_mapper.py        # status vocabulary translation
 │   │   ├── outbox_service.py       # table-based transactional queue (outbox pattern)
+│   │   ├── sync_service.py         # outbox batch processing (called by scheduler.py and api/sync.py)
 │   │   ├── dispatcher.py           # HTTP delivery to each system
 │   │   ├── secrets.py              # secret resolution (Secret Manager / env)
 │   │   └── audit_service.py        # audit_log read/write
@@ -168,6 +178,58 @@ To run the automated tests:
 uv run pytest tests/ -v
 ```
 
+### 3.4. Automatic background sync
+
+By default, the app starts an in-process scheduler (`app/scheduler.py`,
+built on [APScheduler](https://apscheduler.readthedocs.io/)) that calls
+the same outbox-processing logic as `POST /api/v1/sync` every
+`SYNC_INTERVAL_SECONDS` (120s by default) - no external pinger like Google
+Cloud Scheduler is required. This is why the delivery in the example above
+happens automatically within about two minutes even if you never call
+`/api/v1/sync` yourself; to see it immediately, either lower
+`SYNC_INTERVAL_SECONDS` in `.env` or call the endpoint manually:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/sync \
+  -H "X-Scheduler-Secret: $(grep SCHEDULER_SHARED_SECRET .env | cut -d= -f2)"
+```
+
+Set `SYNC_SCHEDULER_ENABLED=false` to disable the in-process scheduler
+entirely and drive sync purely through the endpoint (e.g. if you deploy to
+Cloud Run and use Cloud Scheduler instead - see section 4.6).
+
+### 3.5. Running as a plain container (VM, no GCP)
+
+Because sync no longer depends on an external pinger, running this on a
+plain VM is just: build the image, run it with a reachable Postgres, and
+leave it running - nothing else to wire up.
+
+```bash
+docker build -t ticket-bridge .
+
+docker run -d --name ticket-bridge \
+    -p 8080:8080 \
+    -e DATABASE_URL="postgresql://ticketbridge:PASSWORD@your-postgres-host:5432/ticketbridge" \
+    -e SCHEDULER_SHARED_SECRET="$(openssl rand -base64 32)" \
+    -e SYSTEM_A_OUTBOUND_KEY="..." \
+    ticket-bridge
+```
+
+Run the migrations against that same `DATABASE_URL` first (section 3.2,
+step 4). `SYNC_SCHEDULER_ENABLED` defaults to `true`, so outbox processing
+starts automatically as soon as the container comes up - no Cloud
+Scheduler, no cron, nothing external to configure. The rest of this
+section (4) is GCP/Cloud Run-specific and can be skipped entirely for this
+deployment mode.
+
+> **Secrets outside GCP**: `secrets.py` currently only knows two modes -
+> `ENVIRONMENT=local` reads each `secret_ref` from an environment variable
+> of the same name (as used above), anything else assumes GCP Secret
+> Manager is available. There's no generic "production, but not GCP" mode
+> yet, so a non-GCP VM should keep `ENVIRONMENT=local` (despite the name)
+> to get env-var-based secrets - or extend `secrets.py` with a real third
+> backend if that naming bothers you enough to fix it.
+
 ---
 
 ## 4. Deploying to GCP (production)
@@ -260,7 +322,7 @@ gcloud run deploy ticket-bridge \
     --region=europe-west1 \
     --service-account=ticket-bridge-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
     --add-cloudsql-instances=YOUR_PROJECT_ID:europe-west1:ticket-bridge-db \
-    --set-env-vars="ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID" \
+    --set-env-vars="ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,SYNC_SCHEDULER_ENABLED=false" \
     --set-env-vars="DATABASE_URL=postgresql://ticketbridge:PASSWORD@/ticketbridge?host=/cloudsql/YOUR_PROJECT_ID:europe-west1:ticket-bridge-db" \
     --set-secrets="SCHEDULER_SHARED_SECRET=scheduler-shared-secret:latest" \
     --no-allow-unauthenticated \
@@ -274,7 +336,16 @@ gcloud run deploy ticket-bridge \
 > [Cloud SQL Python Connector](https://cloud.google.com/sql/docs/postgres/connect-connectors)
 > instead of a connection string with an embedded password.
 
-### 4.6. Cloud Scheduler (triggers `/sync`)
+### 4.6. Cloud Scheduler (triggers `/sync`) - only needed on Cloud Run
+
+**Skip this section if you're not deploying to Cloud Run.** The
+in-process scheduler (section 3.4) already triggers sync automatically
+for any deployment that runs as a continuous process (a VM, a persistent
+container). Cloud Scheduler is only needed here because Cloud Run can
+scale an instance to zero between requests, so it can't be relied on to
+run a background job on its own - `SYNC_SCHEDULER_ENABLED` should be set
+to `false` on Cloud Run to avoid pointless scheduler start/stop churn on
+every cold start.
 
 ```bash
 # Give the Scheduler an identity that can invoke the Cloud Run service

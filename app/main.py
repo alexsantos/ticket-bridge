@@ -4,15 +4,17 @@ main.py
 FastAPI application entry point.
 
 Responsibilities:
-  - Lifespan: opens/closes the database connection pool.
+  - Lifespan: opens/closes the database connection pool and starts/stops
+    the in-process outbox-sync scheduler (app/scheduler.py).
   - Registers each functional area's routers (app/api/*).
   - Serves the static configuration/audit frontend at "/".
-  - Health check endpoint at "/health" (used by Cloud Run).
+  - Health check endpoint at "/health" (used by Cloud Run / any container
+    orchestrator's liveness probe).
 
 Run locally:
     uvicorn app.main:app --reload --port 8080
 
-Run in production (Cloud Run):
+Run in production (a long-lived container/VM, or Cloud Run):
     see Dockerfile - uses the same uvicorn command, without --reload.
 """
 import logging
@@ -25,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import audit, conversations, events, sync, systems, topics
 from app.config import get_settings
 from app.database import close_pool, init_pool
+from app.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -34,8 +37,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    start_scheduler()
     logger.info("Ticket Bridge started (environment=%s).", settings.environment)
     yield
+    stop_scheduler()
     await close_pool()
     logger.info("Ticket Bridge shut down.")
 

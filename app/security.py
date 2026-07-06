@@ -6,10 +6,13 @@ Authentication of inbound calls:
   1. POST /api/v1/events - authenticated with a per-system API key
      (api_keys table), sent in the `X-API-Key` header.
   2. POST /api/v1/sync - authenticated with a simple shared secret
-     (SCHEDULER_SHARED_SECRET), sent by Cloud Scheduler in the
-     `X-Scheduler-Secret` header. In production, prefer Cloud Scheduler's
-     native OIDC + Cloud Run (see README.md, "Sync endpoint security"
-     section).
+     (SCHEDULER_SHARED_SECRET), sent in the `X-Scheduler-Secret` header by
+     whoever manually triggers a sync run (ops, a script, or - in a Cloud
+     Run deployment without the in-process scheduler - Cloud Scheduler; in
+     production on Cloud Run, prefer its native OIDC instead, see
+     README.md "Sync endpoint security" section). This has nothing to do
+     with the in-process scheduler (app/scheduler.py), which calls the
+     same sync logic directly in-process and needs no authentication.
   3. Configuration/audit endpoints (/api/v1/systems, /api/v1/conversations,
      /api/v1/audit) - protected by Cloud Run IAM (--no-allow-unauthenticated)
      or by an authentication proxy in front (see README.md).

@@ -25,14 +25,28 @@ class Settings(BaseSettings):
     db_pool_min_size: int = 1
     db_pool_max_size: int = 5
 
-    # Number of outbox rows processed per /api/v1/sync invocation.
+    # Number of outbox rows processed per sync run (whether triggered by
+    # the internal scheduler or manually via /api/v1/sync).
     sync_batch_size: int = 20
+
+    # In-process scheduler (APScheduler) that triggers outbox sync
+    # automatically, without depending on an external pinger like Google
+    # Cloud Scheduler - see CLAUDE.md Decision 2. Suited to deployments
+    # that run as a continuous process (a VM, a long-lived container)
+    # rather than Cloud Run's scale-to-zero model. Disable if you'd rather
+    # drive sync purely via the /api/v1/sync endpoint (e.g. still using
+    # Cloud Scheduler, or a multi-instance deployment where you prefer a
+    # single external trigger over N independent in-process schedulers).
+    sync_scheduler_enabled: bool = True
+    sync_interval_seconds: int = 120
 
     # Timeout (seconds) for outbound HTTP calls to each external system.
     outbound_timeout_seconds: float = 10.0
 
-    # Shared secret that Cloud Scheduler must send to invoke /api/v1/sync
-    # (simple protection against external invocation).
+    # Shared secret required to call POST /api/v1/sync manually (simple
+    # protection against unauthenticated external invocation). Unrelated
+    # to the internal scheduler above, which calls the same logic directly
+    # in-process and needs no authentication.
     scheduler_shared_secret: str = "change-me-in-production"
 
     # Log level.

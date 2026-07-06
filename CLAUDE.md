@@ -55,11 +55,31 @@ UPDATE SKIP LOCKED` guarantees that multiple concurrent invocations of the
 coordination.
 
 **Consciously accepted trade-off**: synchronization latency on the order of
-minutes (Cloud Scheduler's cadence), not seconds. For synchronizing ticket
-state between teams — not for real-time clinical events — this is
+minutes (originally Cloud Scheduler's cadence, now the in-process
+scheduler's interval - see update below), not seconds. For synchronizing
+ticket state between teams — not for real-time clinical events — this is
 adequate. If the latency requirement changes in the future, the natural
-migration would be to replace Cloud Scheduler with Pub/Sub push, keeping
-the `outbox` table as an audit/replay log.
+migration would be to replace polling with Pub/Sub push, keeping the
+`outbox` table as an audit/replay log.
+
+**Update — in-process scheduler instead of Cloud Scheduler**: the original
+rationale for driving `/sync` from an external pinger (Cloud Scheduler)
+was specifically Cloud Run's scale-to-zero model — a Cloud Run instance
+can't be relied on to keep a background thread alive between requests.
+Once the deployment target changed to a continuously-running process (a
+VM, a long-lived container), that constraint no longer applies, and the
+external dependency became unnecessary complexity rather than a
+requirement. `app/scheduler.py` now runs an in-process APScheduler
+(`AsyncIOScheduler`) job on the same event loop as the rest of the app,
+calling the same `sync_service.run_sync_batch()` the HTTP endpoint uses
+(the endpoint was kept as a manual/on-demand trigger, not removed). The
+outbox's `FOR UPDATE SKIP LOCKED` concurrency guarantee is what makes this
+safe even if the app ever runs as multiple instances, each with its own
+independent scheduler firing on its own timer — at worst this means
+redundant polling queries across instances, never double-processing. If
+this deployment ever moves back to something that scales to zero (Cloud
+Run), `SYNC_SCHEDULER_ENABLED=false` reverts to the original
+externally-triggered model with no code changes.
 
 ## Decision 3 — Support for N systems from the start, not just A/B
 
