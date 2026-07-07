@@ -90,9 +90,10 @@ answer wasn't "add more columns" but to generalize the model:
 - The outbox fan-out on insert is "every participant of the conversation
   except the source," not "the other side of the pair."
 - Each system's configuration (`systems`) includes everything specific to
-  it (URL, authentication, status mapping, payload template), so that
-  adding a new system is a configuration operation via the frontend, not a
-  code change.
+  it (URL, authentication), so that adding a new system is a configuration
+  operation via the frontend, not a code change. (Status vocabulary and
+  payload shape are deliberately *not* part of this per-system
+  configuration - see Decision 4.)
 
 Cost of this decision: one extra table and one extra FK, essentially nil.
 Benefit: avoids rewriting the data model when a 3rd or 4th system shows up
@@ -100,17 +101,53 @@ Benefit: avoids rewriting the data model when a 3rd or 4th system shows up
 multiple clinical systems), was a realistic scenario, not a hypothetical
 one.
 
-## Decision 4 — Internal status vocabulary + per-system mapping
+## Decision 4 — One canonical status vocabulary, enforced, not mapped
 
-Each external system has its own status vocabulary (e.g. "Open" vs "NEW").
-Instead of the bridge knowing every vocabulary of every system in code,
-each system defines a `status_mapping` (`{internal: external}`) in its
-configuration. The bridge only knows the canonical internal vocabulary
+**Superseded approach**: the bridge originally let each system define its
+own `status_mapping` (`{internal: external}`, e.g. `system_a` mapped
+`new`→`Open`, `system_b` mapped `new`→`NEW`) and its own `payload_template`
+(a JSON shape with placeholder substitution, optionally split into
+`on_create`/`on_update` variants). The bridge adapted itself to each
+destination's own vocabulary and format; adding a system meant configuring
+translation rules, not writing code.
+
+**Why it was reversed**: this flexibility recreated exactly the kind of
+per-integration drift that a shared correlation hub is supposed to
+eliminate. The author's prior experience with OSTicket was the opposite
+model — one fixed set of concepts/statuses/formats that every integrating
+team had to conform to, a "closed spec." Integrating teams generally
+*prefer* a closed spec: it's a fixed contract to build against once, not a
+configuration surface to keep in sync as the bridge's mapping/template
+JSON evolves. It also closed a real, previously-undetected gap: inbound
+`status` was never actually translated from a source system's own
+vocabulary in the first place (`external_to_internal` existed but was
+dead code — never called), so in practice every caller already had to send
+canonical vocabulary for the system to behave correctly. The per-system
+mapping was only ever doing half its intended job, silently.
+
+**Decision made**: the bridge defines one canonical status vocabulary
 (`new`, `in_progress`, `waiting_third_party`, `resolved`, `closed` — see
-`status_mapper.py`).
+`CanonicalStatus` in `schemas.py`) and one fixed outbound payload shape
+(`OutboundTicketEvent`, built by `payload_builder.build_outbound_payload`)
+that every system receives identically. There is no per-system
+`status_mapping` or `payload_template` anymore (removed by migration
+`003_standardize_ticket_status.sql`, which also adds `CHECK` constraints
+on `conversations.overall_status` and `conversation_participants.local_status`
+so the vocabulary is enforced at the database level too, not just at the
+API boundary via Pydantic's `CanonicalStatus` enum). Translating between
+this canonical vocabulary and whatever a given system's own internal
+states are is now that system's own adapter code's job entirely — the
+bridge no longer knows or cares what "Open" or "NEW" mean to anyone.
 
-This means the translation logic never grows with the number of systems:
-the configuration grows, not the code.
+**Note**: this is specifically about the *status vocabulary and payload
+shape*. `external_ref` (each system's own ticket ID) intentionally stays
+system-specific — there is no ID mapping today and none is proposed; the
+two concepts are easy to conflate but are independent decisions.
+
+This means the bridge itself never grows per-system special-casing: the
+contract is the same size regardless of how many systems join. The cost
+moved from "bridge configuration, per system" to "each system's own
+integration code," which is exactly where the user wants it.
 
 ## Decision 5 — Loop prevention
 
@@ -184,15 +221,15 @@ untouched) — pub/sub terminology maps directly onto what this is.
   candidate list evaluated once, they don't add a new recursive trigger
   path.
 
-**Payload template extension**: since fan-out can now reach a system with
-no prior link to the conversation, `_build_payload` (app/api/events.py)
-gained `{source_ref}`, `{source_system}`, and `{fanout_mode}`
-(`"create"`/`"update"`) placeholders, plus optional reserved
-`on_create`/`on_update` keys in `systems.payload_template` so a template
-can render "please open a ticket" differently from "update your existing
-ticket X." Templates that don't use these reserved keys resolve exactly as
-before — this is additive, not a breaking change to Decision 4's status
-mapping (which is untouched).
+**Payload shape**: since fan-out can now reach a system with no prior link
+to the conversation, `OutboundTicketEvent` (see Decision 4) has an `event`
+field — `"ticket.created"` when the destination has no
+`conversation_participants` row yet, `"ticket.updated"` otherwise — so a
+destination can tell "please open a ticket" apart from "update your
+existing ticket X" (via `external_ref`, present only on `ticket.updated`).
+This was originally implemented as a per-system `on_create`/`on_update`
+payload-template mechanism; Decision 4 replaced that with one fixed shape
+for every destination, `event` included.
 
 ## What this skeleton assumes and leaves undecided
 

@@ -15,6 +15,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas import CanonicalStatus
+
 
 class System(BaseModel):
     code: str
@@ -22,8 +24,6 @@ class System(BaseModel):
     base_url: str
     auth_type: Literal["api_key", "bearer", "basic"]
     auth_config: dict[str, Any]
-    status_mapping: dict[str, str]
-    payload_template: dict[str, Any]
     active: bool
     topics: list[str]
     created_at: datetime
@@ -43,7 +43,7 @@ class ConversationParticipant(BaseModel):
     conversation_id: UUID
     system_code: str
     external_ref: str
-    local_status: str | None
+    local_status: CanonicalStatus | None
     joined_at: datetime
     updated_at: datetime
 
@@ -52,7 +52,7 @@ class Conversation(BaseModel):
     conversation_id: UUID
     subject: str | None
     topic_code: str
-    overall_status: str
+    overall_status: CanonicalStatus
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime

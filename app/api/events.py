@@ -16,20 +16,19 @@ Flow (all within a single transaction):
   3. Creates or locates the conversation (correlation_service).
   4. Performs fan-out: every system currently subscribed to the
      conversation's topic (except the source, and narrowed by the explicit
-     `recipients` list if provided) gets an outbox entry. Destinations with
-     no prior `conversation_participants` row are told to open a new
-     ticket rather than update one (see `_build_payload`).
+     `recipients` list if provided) gets an outbox entry, built from the
+     one fixed payload shape every destination receives (see
+     payload_builder.build_outbound_payload) - no per-system customization.
   5. Records everything in audit_log.
 """
 import logging
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
 from app.schemas import IncomingEvent, IncomingEventResponse
 from app.security import authenticate_system
-from app.services import correlation_service, outbox_service, status_mapper
+from app.services import correlation_service, outbox_service, payload_builder
 from app.services.audit_service import record_audit
 
 logger = logging.getLogger(__name__)
@@ -48,14 +47,16 @@ async def receive_event(
 
             # 1. Correlation: create or locate the conversation and update the source participant.
             try:
-                conversation_id, created, topic_code = await correlation_service.find_or_create_conversation(
-                    conn,
-                    conversation_id=event.conversation_id,
-                    source=source,
-                    external_ref=event.external_ref,
-                    status=event.status,
-                    subject=event.subject,
-                    topic_code=event.topic_code,
+                conversation_id, created, topic_code, conversation_subject = (
+                    await correlation_service.find_or_create_conversation(
+                        conn,
+                        conversation_id=event.conversation_id,
+                        source=source,
+                        external_ref=event.external_ref,
+                        status=event.status,
+                        subject=event.subject,
+                        topic_code=event.topic_code,
+                    )
                 )
             except correlation_service.ConversationNotFound as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -88,19 +89,14 @@ async def receive_event(
                     logger.warning("Destination '%s' inactive or nonexistent - skipping.", destination)
                     continue
 
-                translated_status = status_mapper.internal_to_external(
-                    destination_system["status_mapping"], event.status
-                )
-                is_known = destination_row["is_known_participant"]
-
-                payload = _build_payload(
-                    template=destination_system["payload_template"],
-                    external_ref=destination_row["external_ref"],
-                    mapped_status=translated_status,
+                payload = payload_builder.build_outbound_payload(
+                    is_known_participant=destination_row["is_known_participant"],
                     conversation_id=conversation_id,
-                    source_ref=event.external_ref,
+                    status=event.status,
                     source_system=source,
-                    is_known=is_known,
+                    source_ref=event.external_ref,
+                    external_ref=destination_row["external_ref"],
+                    conversation_subject=conversation_subject,
                 )
 
                 outbox_id = await outbox_service.enqueue(
@@ -108,13 +104,10 @@ async def receive_event(
                     conversation_id=conversation_id,
                     destination=destination,
                     source=source,
-                    payload=payload,
+                    payload=payload.model_dump(mode="json"),
                 )
                 outbox_ids.append(outbox_id)
-                fanout_detail.append({
-                    "destination": destination,
-                    "mode": "update" if is_known else "create",
-                })
+                fanout_detail.append({"destination": destination, "event": payload.event})
 
             await record_audit(
                 conn,
@@ -155,60 +148,7 @@ async def _get_topic(conn, code: str) -> dict | None:
 async def _get_system_config(conn, code: str) -> dict | None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT code, base_url, auth_type, auth_config, status_mapping, payload_template, active "
-            "FROM systems WHERE code = %(code)s",
+            "SELECT code, base_url, auth_type, auth_config, active FROM systems WHERE code = %(code)s",
             {"code": code},
         )
         return await cur.fetchone()
-
-
-def _build_payload(
-    *,
-    template: dict,
-    external_ref: str | None,
-    mapped_status: str,
-    conversation_id: UUID,
-    source_ref: str,
-    source_system: str,
-    is_known: bool,
-) -> dict:
-    """
-    Applies placeholder substitution to the template configured for the
-    destination system (systems.payload_template).
-
-    Available placeholders: {external_ref} (the destination's own known
-    ticket ref - empty string if it doesn't have one yet), {mapped_status},
-    {conversation_id}, {source_ref} (the source system's own ref),
-    {source_system}, {fanout_mode} ("update" or "create").
-
-    A template may optionally provide two variants under the reserved
-    top-level keys "on_create"/"on_update"; the matching one is picked
-    based on whether the destination already has a linked ticket
-    (`is_known`). Templates that don't use these reserved keys are resolved
-    as a single flat shape, exactly as before this distinction existed.
-    """
-    values = {
-        "external_ref": external_ref or "",
-        "mapped_status": mapped_status,
-        "conversation_id": str(conversation_id),
-        "source_ref": source_ref,
-        "source_system": source_system,
-        "fanout_mode": "update" if is_known else "create",
-    }
-
-    def _resolve(v):
-        if isinstance(v, str):
-            return v.format(**values)
-        if isinstance(v, dict):
-            return {k: _resolve(val) for k, val in v.items()}
-        return v
-
-    if not template:
-        # No template configured - use a reasonable generic shape.
-        return values
-
-    if "on_create" in template or "on_update" in template:
-        variant = template.get("on_update" if is_known else "on_create", {})
-        return _resolve(variant)
-
-    return _resolve(template)

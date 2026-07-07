@@ -19,6 +19,87 @@ See **`CLAUDE.md`** for the full rationale behind the architecture decisions.
 
 ---
 
+## Integration contract
+
+Every system that integrates with Ticket Bridge speaks the same fixed
+contract - there is no per-system status mapping or payload template to
+configure (see CLAUDE.md Decision 4). If your team is building the
+adapter that connects your support tool to the bridge, this section is
+everything you need.
+
+### Canonical status vocabulary
+
+Every `status` value, in both directions (what you send to the bridge and
+what you receive from it), must be exactly one of these five:
+
+| Status | Meaning |
+|---|---|
+| `new` | Ticket just created, not yet worked on |
+| `in_progress` | Actively being worked on |
+| `waiting_third_party` | Blocked on someone outside the two systems |
+| `resolved` | Fix applied, pending confirmation/closure |
+| `closed` | Done |
+
+Your own system's internal statuses (`Open`, `NEW`, `In Progress`, etc.)
+are **your** adapter's responsibility to translate to/from this list. The
+bridge enforces this at the API boundary (`POST /api/v1/events` rejects
+anything else with `422`) and at the database level (a `CHECK` constraint
+on the stored status columns) - there is nothing to configure on the
+bridge side.
+
+### Outbound payload shape
+
+When your system is subscribed to a topic (see section 1) and a ticket in
+it is created or updated, your `base_url` receives exactly this shape -
+identical for every system, always:
+
+```json
+{
+  "event": "ticket.created",
+  "conversation_id": "8a1ca7f4-0c8a-4e4d-843f-05c0ab201f07",
+  "status": "new",
+  "source_system": "system_a",
+  "source_ref": "TICKET-1001",
+  "external_ref": null,
+  "conversation_subject": "Print queue stuck on floor 3"
+}
+```
+
+- `event`: `"ticket.created"` the first time your system sees this
+  conversation (you have no ticket of your own yet, so `external_ref` is
+  `null`); `"ticket.updated"` every time after (referencing the ticket ref
+  you yourself reported back the first time).
+- `source_system` / `source_ref`: which system and ticket ID originated
+  this event - useful for cross-referencing even before you've linked
+  your own ticket.
+- `external_ref`: **your own** ticket ID for this conversation, once
+  known - report it via `POST /api/v1/events` (below) so future updates
+  include it.
+
+### Reporting your own ticket / status changes
+
+`POST /api/v1/events`, authenticated with your system's API key
+(`X-API-Key` header):
+
+```json
+{
+  "conversation_id": "8a1ca7f4-0c8a-4e4d-843f-05c0ab201f07",
+  "external_ref": "INC-2001",
+  "status": "new",
+  "topic_code": "INFRA",
+  "subject": "Print queue stuck on floor 3"
+}
+```
+
+`conversation_id` is omitted only when creating a brand-new ticket (in
+which case `topic_code` is required, and your system must be subscribed
+to it). `subject` is only used at creation. See
+[`examples/README.md`](examples/README.md) for a full worked walkthrough
+(two systems, both directions, plus a live-delivery demo you can run
+locally).
+
+---
+
 ## 1. Architecture overview
 
 ```
@@ -82,7 +163,7 @@ ticket-bridge/
 │   │   └── audit.py             # GET  /api/v1/audit
 │   ├── services/
 │   │   ├── correlation_service.py  # conversation/participant management + fan-out resolution
-│   │   ├── status_mapper.py        # status vocabulary translation
+│   │   ├── payload_builder.py      # builds the one fixed outbound payload shape
 │   │   ├── outbox_service.py       # table-based transactional queue (outbox pattern)
 │   │   ├── sync_service.py         # outbox batch processing (called by scheduler.py and api/sync.py)
 │   │   ├── dispatcher.py           # HTTP delivery to each system
@@ -93,10 +174,11 @@ ticket-bridge/
 │       ├── style.css
 │       └── app.js
 ├── migrations/
-│   ├── 001_initial_schema.sql   # full schema, incl. topics/subscriptions (run first)
-│   └── 002_seed_example.sql     # sample systems, topics, subscriptions (development only)
+│   ├── 001_initial_schema.sql              # full schema, incl. topics/subscriptions (run first)
+│   ├── 002_seed_example.sql                # sample systems, topics, subscriptions (development only)
+│   └── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
 ├── tests/
-│   └── test_status_mapper.py
+│   └── test_payload_builder.py
 ├── pyproject.toml               # project metadata and dependencies (uv)
 ├── uv.lock                      # pinned, reproducible dependency versions
 ├── .python-version              # Python version pinned for uv
@@ -134,9 +216,10 @@ uv sync
 # 3. Create the local database
 createdb ticketbridge
 
-# 4. Run the migrations
+# 4. Run the migrations, in order
 psql "postgresql://localhost/ticketbridge" -f migrations/001_initial_schema.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/002_seed_example.sql   # optional, sample data
+psql "postgresql://localhost/ticketbridge" -f migrations/003_standardize_ticket_status.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -274,6 +357,8 @@ gcloud sql users create ticketbridge \
 cloud-sql-proxy YOUR_PROJECT_ID:europe-west1:ticket-bridge-db &
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/001_initial_schema.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/003_standardize_ticket_status.sql
 # (002_seed_example.sql is for development only - do not run in production)
 ```
 

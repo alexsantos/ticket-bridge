@@ -35,12 +35,13 @@ async def find_or_create_conversation(
     status: str,
     subject: str | None,
     topic_code: str | None,
-) -> tuple[UUID, bool, str]:
+) -> tuple[UUID, bool, str, str | None]:
     """
-    Returns (conversation_id, created, topic_code) - `created` indicates
-    whether the conversation was just created (True) or already existed
-    (False); `topic_code` is always the conversation's effective (stored)
-    topic, so the caller never needs a follow-up query to fan out.
+    Returns (conversation_id, created, topic_code, subject) - `created`
+    indicates whether the conversation was just created (True) or already
+    existed (False); `topic_code` and `subject` are always the
+    conversation's effective (stored) values, so the caller never needs a
+    follow-up query to fan out.
 
     Rules:
       - If `conversation_id` is provided, the conversation must already
@@ -55,7 +56,7 @@ async def find_or_create_conversation(
     async with conn.cursor() as cur:
         if conversation_id is not None:
             await cur.execute(
-                "SELECT conversation_id, topic_code FROM conversations WHERE conversation_id = %(id)s",
+                "SELECT conversation_id, topic_code, subject FROM conversations WHERE conversation_id = %(id)s",
                 {"id": conversation_id},
             )
             row = await cur.fetchone()
@@ -67,6 +68,7 @@ async def find_or_create_conversation(
                     f"not '{topic_code}' - topics are immutable after creation."
                 )
             topic_code = row["topic_code"]
+            subject = row["subject"]
             created = False
         else:
             await cur.execute(
@@ -98,7 +100,7 @@ async def find_or_create_conversation(
             detail={"external_ref": external_ref, "status": status, "topic_code": topic_code},
         )
 
-    return conversation_id, created, topic_code
+    return conversation_id, created, topic_code, subject
 
 
 async def _upsert_participant(

@@ -6,10 +6,28 @@ models.py (internal domain) so that evolving the public API doesn't force
 changes to the internal structure, and vice versa.
 """
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+
+class CanonicalStatus(StrEnum):
+    """
+    The bridge's one canonical ticket status vocabulary - every system
+    speaks this directly, in both directions. There is no per-system
+    mapping: a source system must translate its own internal status to
+    one of these values before calling /api/v1/events, and a destination
+    system must translate one of these values back to its own internal
+    status upon receiving an outbound event. See README.md "Integration
+    contract" and CLAUDE.md Decision 4.
+    """
+    NEW = "new"
+    IN_PROGRESS = "in_progress"
+    WAITING_THIRD_PARTY = "waiting_third_party"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +46,7 @@ class IncomingEvent(BaseModel):
         default=None, description="Omit when creating a new conversation."
     )
     external_ref: str = Field(description="Ticket ID in the source system.")
-    status: str = Field(description="Status in the source system's vocabulary.")
+    status: CanonicalStatus = Field(description="Status in the bridge's canonical vocabulary.")
     subject: str | None = Field(default=None, description="Free-text ticket title.")
     topic_code: str | None = Field(
         default=None,
@@ -50,6 +68,29 @@ class IncomingEventResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Events delivered to external systems (outbound, via POST /api/v1/sync)
+# ---------------------------------------------------------------------------
+class OutboundTicketEvent(BaseModel):
+    """
+    The fixed payload every destination system receives - identical shape
+    and vocabulary for all of them, no per-system customization. This is
+    the integration contract each system's own adapter code is written
+    against; see README.md "Integration contract" and CLAUDE.md Decision 4.
+    """
+    event: Literal["ticket.created", "ticket.updated"]
+    conversation_id: UUID
+    status: CanonicalStatus
+    source_system: str
+    source_ref: str
+    external_ref: str | None = Field(
+        default=None,
+        description="This destination's own known ticket ref. Absent on 'ticket.created' "
+                    "(the destination has none yet); always present on 'ticket.updated'.",
+    )
+    conversation_subject: str | None = None
+
+
+# ---------------------------------------------------------------------------
 # Synchronization (POST /api/v1/sync)
 # ---------------------------------------------------------------------------
 class SyncResult(BaseModel):
@@ -68,8 +109,6 @@ class SystemCreate(BaseModel):
     base_url: str
     auth_type: Literal["api_key", "bearer", "basic"] = "api_key"
     auth_config: dict[str, Any] = Field(default_factory=dict)
-    status_mapping: dict[str, str] = Field(default_factory=dict)
-    payload_template: dict[str, Any] = Field(default_factory=dict)
     active: bool = True
     topics: list[str] = Field(
         default_factory=list, description="Topic codes this system subscribes to."
@@ -81,8 +120,6 @@ class SystemUpdate(BaseModel):
     base_url: str | None = None
     auth_type: Literal["api_key", "bearer", "basic"] | None = None
     auth_config: dict[str, Any] | None = None
-    status_mapping: dict[str, str] | None = None
-    payload_template: dict[str, Any] | None = None
     active: bool | None = None
     topics: list[str] | None = None
 
@@ -92,7 +129,6 @@ class SystemOut(BaseModel):
     name: str
     base_url: str
     auth_type: str
-    status_mapping: dict[str, str]
     active: bool
     topics: list[str]
     created_at: datetime
@@ -132,7 +168,7 @@ class TopicOut(BaseModel):
 class ParticipantOut(BaseModel):
     system_code: str
     external_ref: str
-    local_status: str | None
+    local_status: CanonicalStatus | None
     updated_at: datetime
 
 
@@ -140,7 +176,7 @@ class ConversationOut(BaseModel):
     conversation_id: UUID
     subject: str | None
     topic_code: str
-    overall_status: str
+    overall_status: CanonicalStatus
     created_at: datetime
     updated_at: datetime
     participants: list[ParticipantOut]

@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 _pool: AsyncConnectionPool | None = None
 
 # psycopg3 doesn't adapt plain dicts to jsonb by default (unlike psycopg2) -
-# every jsonb column in this schema (systems.auth_config/status_mapping/
-# payload_template, conversations.metadata, outbox.payload, audit_log.detail)
-# is written from a plain Python dict throughout the codebase, so register
-# this once globally instead of wrapping every call site in Jsonb(...).
+# every jsonb column in this schema (systems.auth_config, conversations.metadata,
+# outbox.payload, audit_log.detail) is written from a plain Python dict
+# throughout the codebase, so register this once globally instead of
+# wrapping every call site in Jsonb(...).
 psycopg.adapters.register_dumper(dict, JsonbDumper)
 psycopg.adapters.register_dumper(dict, JsonbBinaryDumper)
 

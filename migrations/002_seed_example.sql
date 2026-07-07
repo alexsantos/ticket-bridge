@@ -16,7 +16,7 @@ VALUES
     ('SPM', 'Service & Project Management', 'Project coordination and service requests'),
     ('SALES', 'Sales', 'Sales team requests and customer escalations');
 
-INSERT INTO systems (code, name, base_url, auth_type, auth_config, status_mapping, payload_template, active)
+INSERT INTO systems (code, name, base_url, auth_type, auth_config, active)
 VALUES
 (
     'system_a',
@@ -24,28 +24,6 @@ VALUES
     'https://system-a.example.local/api/tickets/webhook',
     'api_key',
     '{"header": "X-API-Key", "secret_ref": "system_a_outbound_key"}',
-    '{
-        "new": "Open",
-        "in_progress": "Under Way",
-        "waiting_third_party": "Awaiting Reply",
-        "resolved": "Resolved",
-        "closed": "Closed"
-    }',
-    '{
-        "on_create": {
-            "action": "create_ticket",
-            "source_ref": "{source_ref}",
-            "source_system": "{source_system}",
-            "status": "{mapped_status}",
-            "conversation_id": "{conversation_id}"
-        },
-        "on_update": {
-            "action": "update_ticket",
-            "ticket_ref": "{external_ref}",
-            "status": "{mapped_status}",
-            "conversation_id": "{conversation_id}"
-        }
-    }',
     TRUE
 ),
 (
@@ -54,28 +32,6 @@ VALUES
     'https://system-b.example.local/api/v2/incidents/hook',
     'bearer',
     '{"secret_ref": "system_b_outbound_token"}',
-    '{
-        "new": "NEW",
-        "in_progress": "IN_PROGRESS",
-        "waiting_third_party": "WAITING",
-        "resolved": "RESOLVED",
-        "closed": "CLOSED"
-    }',
-    '{
-        "on_create": {
-            "action": "CREATE",
-            "source_ref": "{source_ref}",
-            "source_system": "{source_system}",
-            "status": "{mapped_status}",
-            "correlation": "{conversation_id}"
-        },
-        "on_update": {
-            "action": "UPDATE",
-            "incident_id": "{external_ref}",
-            "status": "{mapped_status}",
-            "correlation": "{conversation_id}"
-        }
-    }',
     TRUE
 );
 

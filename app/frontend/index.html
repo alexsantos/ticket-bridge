@@ -72,12 +72,11 @@
                     <label>Secret reference (name in Secret Manager / env var)
                         <input type="text" name="secret_ref" placeholder="e.g. system_c_outbound_key">
                     </label>
-                    <label>Status mapping (JSON: internal → external)
-                        <textarea name="status_mapping" rows="5" placeholder='{"new": "Open", "resolved": "Resolved"}'></textarea>
-                    </label>
-                    <label>Payload template (JSON, with {external_ref}, {mapped_status}, {conversation_id}, {source_ref}, {source_system}, {fanout_mode}; optionally split into "on_create"/"on_update" variants)
-                        <textarea name="payload_template" rows="4" placeholder='{"id": "{external_ref}", "status": "{mapped_status}"}'></textarea>
-                    </label>
+                    <p class="hint">
+                        Status vocabulary and payload shape are fixed by the bridge for every
+                        system - see the "Integration contract" section in README.md. There's
+                        nothing to configure here.
+                    </p>
                     <fieldset id="system-topics-fieldset">
                         <legend>Subscribed topics (receives every ticket/update for these)</legend>
                         <div id="system-topics-checkboxes"></div>

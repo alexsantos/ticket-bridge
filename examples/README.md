@@ -4,8 +4,11 @@ A worked walkthrough of the seed data from `migrations/002_seed_example.sql`:
 `system_a` (Clinical Team ServiceDesk) is subscribed to `INFRA`; `system_b`
 (Infrastructure Team ITSM) is subscribed to `INFRA` and `SPM`. This shows
 what happens, step by step, when a ticket moves through both systems -
-including the exact JSON payload the fan-out mechanism builds for the
-subscriber at each step.
+including the exact JSON payload the fan-out mechanism builds at each
+step. Notice it's the **same shape every time**, for both systems - that's
+the whole point of the fixed integration contract (see README.md
+"Integration contract" and CLAUDE.md Decision 4): there's no per-system
+customization to configure or reason about.
 
 Two ways to run it:
 
@@ -14,8 +17,7 @@ Two ways to run it:
   (`https://system-a.example.local/...`, `https://system-b.example.local/...`)
   are fictional, `/api/v1/sync` calls will report delivery failures - the
   script explains this at each step and prints the payload that *would
-  have* been sent (computed from `payload_template`/`status_mapping`,
-  matching what the code actually builds).
+  have* been sent, matching what the code actually builds.
 - **`./live_delivery_demo.sh`** - a better way to see it: temporarily
   points `system_b` at a tiny local mock server (`mock_receiver.py`, stdlib
   only, no new dependencies) so you watch a **real** HTTP delivery happen
@@ -24,8 +26,9 @@ Two ways to run it:
 
 Both scripts assume the app is running locally (`uv run uvicorn
 app.main:app --reload --port 8080`, see README.md section 3) with
-`migrations/001_initial_schema.sql` and `002_seed_example.sql` applied, and
-read `SCHEDULER_SHARED_SECRET` from `../.env` if present.
+`migrations/001_initial_schema.sql`, `002_seed_example.sql`, and
+`003_standardize_ticket_status.sql` applied, and read
+`SCHEDULER_SHARED_SECRET` from `../.env` if present.
 
 ```bash
 chmod +x examples/*.sh   # if not already executable
@@ -57,30 +60,27 @@ there - see "Error scenarios" below), so this succeeds and returns a new
 `conversation_id`.
 
 **What the fan-out sends**: `system_b` is subscribed to `INFRA` and has no
-ticket linked to this conversation yet, so it gets the `on_create` variant
-of its `payload_template`, with the internal status `new` translated to
-`system_b`'s own vocabulary (`NEW`, per its `status_mapping`):
+ticket linked to this conversation yet, so it gets `"event":
+"ticket.created"` with `external_ref: null` - it has nothing of its own to
+reference yet:
 
 ```json
 {
-  "action": "CREATE",
-  "source_ref": "TICKET-1001",
+  "event": "ticket.created",
+  "conversation_id": "<conversation_id>",
+  "status": "new",
   "source_system": "system_a",
-  "status": "NEW",
-  "correlation": "<conversation_id>"
+  "source_ref": "TICKET-1001",
+  "external_ref": null,
+  "conversation_subject": "Print queue stuck on floor 3"
 }
 ```
 
-`{external_ref}` is deliberately absent here - `system_b` has nothing to
-reference yet, so the template only exposes `system_a`'s own ref
-(`source_ref`) for cross-referencing, and `source_system` so it's obvious
-where this came from.
-
 ### 2. Sync runs, `system_b` receives the payload and opens its own ticket
 
-In a real integration, `system_b` would open its own ticket and report
-back automatically upon receiving the payload above. Here, that's the next
-manual call:
+In a real integration, `system_b`'s own adapter would open a ticket and
+report back automatically upon receiving the payload above. Here, that's
+the next manual call:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/events \
@@ -98,15 +98,18 @@ conversation exists.
 
 **What the fan-out sends**: fan-out excludes only the *source* of the
 event, not other already-linked participants - so this also notifies
-`system_a`, which already has `TICKET-1001` linked, with its own
-`on_update` payload:
+`system_a`, which already has `TICKET-1001` linked, with `"event":
+"ticket.updated"` referencing that ref:
 
 ```json
 {
-  "action": "update_ticket",
-  "ticket_ref": "TICKET-1001",
-  "status": "Open",
-  "conversation_id": "<conversation_id>"
+  "event": "ticket.updated",
+  "conversation_id": "<conversation_id>",
+  "status": "new",
+  "source_system": "system_b",
+  "source_ref": "INC-2001",
+  "external_ref": "TICKET-1001",
+  "conversation_subject": "Print queue stuck on floor 3"
 }
 ```
 
@@ -124,23 +127,28 @@ curl -X POST http://localhost:8080/api/v1/events \
 ```
 
 **What the fan-out sends**: `system_b` now *has* a ticket linked
-(`INC-2001`, from step 2), so this time it gets the `on_update` variant
-instead, referencing its own known ticket:
+(`INC-2001`, from step 2), so this time it gets `"event": "ticket.updated"`
+referencing its own known ticket - same shape as step 2, just addressed
+to the other system:
 
 ```json
 {
-  "action": "UPDATE",
-  "incident_id": "INC-2001",
-  "status": "IN_PROGRESS",
-  "correlation": "<conversation_id>"
+  "event": "ticket.updated",
+  "conversation_id": "<conversation_id>",
+  "status": "in_progress",
+  "source_system": "system_a",
+  "source_ref": "TICKET-1001",
+  "external_ref": "INC-2001",
+  "conversation_subject": "Print queue stuck on floor 3"
 }
 ```
 
-This is the core behavior change from plain participant-based fan-out:
-the *same* conversation produces a "please open a ticket" payload the
-first time and an "update your ticket" payload every time after, purely
-based on whether `conversation_participants` already has a row for that
-destination - see `CLAUDE.md` Decision 8.
+This is the core behavior: the *same* conversation produces a
+`ticket.created` payload the first time a destination sees it, and
+`ticket.updated` every time after, purely based on whether
+`conversation_participants` already has a row for that destination - see
+`CLAUDE.md` Decision 8. The shape itself never changes between systems -
+only the values do (see Decision 4).
 
 ### 4. `system_b` resolves its ticket - fan-out flows the other way
 
@@ -156,15 +164,20 @@ curl -X POST http://localhost:8080/api/v1/events \
 ```
 
 **What the fan-out sends**: `system_a` already has `TICKET-1001` linked,
-so it gets its own `on_update` shape, in its own vocabulary
-(`resolved` → `Resolved`, per `system_a`'s `status_mapping`):
+so it gets `"event": "ticket.updated"` too - the canonical `status` value
+(`resolved`) is sent as-is; translating it to whatever `system_a`'s own
+internal vocabulary calls "resolved" is `system_a`'s own adapter's job,
+not the bridge's:
 
 ```json
 {
-  "action": "update_ticket",
-  "ticket_ref": "TICKET-1001",
-  "status": "Resolved",
-  "conversation_id": "<conversation_id>"
+  "event": "ticket.updated",
+  "conversation_id": "<conversation_id>",
+  "status": "resolved",
+  "source_system": "system_b",
+  "source_ref": "INC-2001",
+  "external_ref": "TICKET-1001",
+  "conversation_subject": "Print queue stuck on floor 3"
 }
 ```
 
@@ -209,4 +222,16 @@ curl -X POST http://localhost:8080/api/v1/events \
   -H "X-API-Key: dev-key-system-a" \
   -d '{"conversation_id": "<conversation_id>", "external_ref": "TICKET-1001", "status": "new", "topic_code": "SPM"}'
 # -> 409: "Conversation ... belongs to topic 'INFRA', not 'SPM' - topics are immutable after creation."
+```
+
+**Sending a non-canonical status** (only `new`, `in_progress`,
+`waiting_third_party`, `resolved`, `closed` are accepted - see README.md
+"Integration contract"):
+
+```bash
+curl -X POST http://localhost:8080/api/v1/events \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-key-system-a" \
+  -d '{"external_ref": "X", "status": "Open", "topic_code": "INFRA"}'
+# -> 422: status must be one of 'new', 'in_progress', 'waiting_third_party', 'resolved', 'closed'
 ```

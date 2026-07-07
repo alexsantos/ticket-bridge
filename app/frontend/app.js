@@ -185,25 +185,14 @@ function openSystemDialog(system) {
         systemForm.name.value = system.name;
         systemForm.base_url.value = system.base_url;
         systemForm.auth_type.value = system.auth_type;
-        systemForm.status_mapping.value = JSON.stringify(system.status_mapping || {}, null, 2);
         systemForm.active.checked = system.active;
     }
     renderSystemTopicsCheckboxes(system ? system.topics : []);
     systemDialog.showModal();
 }
 
-systemForm.addEventListener("submit", async (ev) => {
+systemForm.addEventListener("submit", async () => {
     const data = new FormData(systemForm);
-    let statusMapping = {};
-    let payloadTemplate = {};
-    try {
-        statusMapping = data.get("status_mapping") ? JSON.parse(data.get("status_mapping")) : {};
-        payloadTemplate = data.get("payload_template") ? JSON.parse(data.get("payload_template")) : {};
-    } catch (e) {
-        alert("Invalid JSON in status mapping or payload template.");
-        ev.preventDefault();
-        return;
-    }
 
     const topics = Array.from(
         document.querySelectorAll("#system-topics-checkboxes input[type=checkbox]:checked")
@@ -214,8 +203,6 @@ systemForm.addEventListener("submit", async (ev) => {
         base_url: data.get("base_url"),
         auth_type: data.get("auth_type"),
         auth_config: { secret_ref: data.get("secret_ref") || null },
-        status_mapping: statusMapping,
-        payload_template: payloadTemplate,
         active: systemForm.active.checked,
         topics: topics,
     };

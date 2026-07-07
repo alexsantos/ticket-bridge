@@ -13,7 +13,7 @@
 # delivery failures - that's expected, and explained inline. To see a real
 # delivery happen, run live_delivery_demo.sh instead.
 #
-# Prerequisites: app running locally with 001+002 migrations applied
+# Prerequisites: app running locally with 001+002+003 migrations applied
 # (see README.md section 3).
 
 set -euo pipefail
@@ -38,8 +38,8 @@ echo "$RESPONSE" | json
 CONVERSATION_ID=$(echo "$RESPONSE" | field conversation_id)
 echo
 echo "    -> system_b is subscribed to INFRA and has no ticket linked yet,"
-echo "       so the outbox now holds an 'on_create' payload for it:"
-echo "       {\"action\": \"CREATE\", \"source_ref\": \"TICKET-1001\", \"source_system\": \"system_a\", \"status\": \"NEW\", \"correlation\": \"$CONVERSATION_ID\"}"
+echo "       so the outbox now holds a 'ticket.created' payload for it:"
+echo "       {\"event\": \"ticket.created\", \"conversation_id\": \"$CONVERSATION_ID\", \"status\": \"new\", \"source_system\": \"system_a\", \"source_ref\": \"TICKET-1001\", \"external_ref\": null, \"conversation_subject\": \"Print queue stuck on floor 3\"}"
 echo
 
 echo "### 2. Trigger sync (the in-process scheduler would do this automatically within SYNC_INTERVAL_SECONDS)"
@@ -56,8 +56,8 @@ curl -s -X POST "$BASE_URL/api/v1/events" \
 echo
 echo "    -> this ALSO fans out to system_a (already linked as TICKET-1001),"
 echo "       since fan-out excludes only the event's source, not other"
-echo "       already-linked participants - system_a gets its own on_update:"
-echo "       {\"action\": \"update_ticket\", \"ticket_ref\": \"TICKET-1001\", \"status\": \"Open\", \"conversation_id\": \"$CONVERSATION_ID\"}"
+echo "       already-linked participants - system_a gets 'ticket.updated':"
+echo "       {\"event\": \"ticket.updated\", \"conversation_id\": \"$CONVERSATION_ID\", \"status\": \"new\", \"source_system\": \"system_b\", \"source_ref\": \"INC-2001\", \"external_ref\": \"TICKET-1001\", \"conversation_subject\": \"Print queue stuck on floor 3\"}"
 echo
 
 echo "### 4. system_a updates the ticket to in_progress"
@@ -67,8 +67,9 @@ curl -s -X POST "$BASE_URL/api/v1/events" \
   -d "{\"conversation_id\": \"$CONVERSATION_ID\", \"external_ref\": \"TICKET-1001\", \"status\": \"in_progress\"}" | json
 echo
 echo "    -> system_b now HAS a ticket linked (INC-2001), so this time the"
-echo "       outbox holds an 'on_update' payload instead:"
-echo "       {\"action\": \"UPDATE\", \"incident_id\": \"INC-2001\", \"status\": \"IN_PROGRESS\", \"correlation\": \"$CONVERSATION_ID\"}"
+echo "       outbox holds a 'ticket.updated' payload instead - same shape,"
+echo "       different destination:"
+echo "       {\"event\": \"ticket.updated\", \"conversation_id\": \"$CONVERSATION_ID\", \"status\": \"in_progress\", \"source_system\": \"system_a\", \"source_ref\": \"TICKET-1001\", \"external_ref\": \"INC-2001\", \"conversation_subject\": \"Print queue stuck on floor 3\"}"
 echo
 
 echo "### 5. system_b resolves its ticket - fans back out to system_a"
@@ -78,8 +79,9 @@ curl -s -X POST "$BASE_URL/api/v1/events" \
   -d "{\"conversation_id\": \"$CONVERSATION_ID\", \"external_ref\": \"INC-2001\", \"status\": \"resolved\"}" | json
 echo
 echo "    -> system_a already has a ticket linked (TICKET-1001), so it gets"
-echo "       an 'on_update' payload in its own vocabulary/shape:"
-echo "       {\"action\": \"update_ticket\", \"ticket_ref\": \"TICKET-1001\", \"status\": \"Resolved\", \"conversation_id\": \"$CONVERSATION_ID\"}"
+echo "       'ticket.updated' too - the canonical status 'resolved' is sent"
+echo "       as-is; translating it to system_a's own vocabulary is its job:"
+echo "       {\"event\": \"ticket.updated\", \"conversation_id\": \"$CONVERSATION_ID\", \"status\": \"resolved\", \"source_system\": \"system_b\", \"source_ref\": \"INC-2001\", \"external_ref\": \"TICKET-1001\", \"conversation_subject\": \"Print queue stuck on floor 3\"}"
 echo
 
 echo "### 6. Trigger sync again and inspect the final state"
