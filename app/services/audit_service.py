@@ -40,12 +40,23 @@ async def list_recent(
     conn: AsyncConnection,
     *,
     limit: int = 100,
+    offset: int = 0,
     conversation_id: UUID | None = None,
     system_code: str | None = None,
-) -> list[dict[str, Any]]:
-    """Lists the most recent audit entries, with optional filters."""
+) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Lists audit entries page by page (most recent first), with optional
+    filters. Returns (rows, has_more) - `has_more` is computed by fetching
+    one extra row past `limit` rather than a separate COUNT(*) query.
+
+    Sorted by `created_at DESC, id DESC`: multiple rows written in the same
+    transaction (e.g. several delivery_success entries from one /sync
+    batch) can share the exact same `created_at` timestamp, and `ORDER BY
+    created_at DESC` alone is not a stable sort in that case - without the
+    `id` tiebreaker, rows could be skipped or repeated across pages.
+    """
     filters = []
-    params: dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
 
     if conversation_id is not None:
         filters.append("conversation_id = %(cid)s")
@@ -62,9 +73,13 @@ async def list_recent(
             SELECT id, conversation_id, system_code, event_type, detail, created_at
             FROM audit_log
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT %(limit)s
+            OFFSET %(offset)s
             """,
             params,
         )
-        return await cur.fetchall()
+        rows = await cur.fetchall()
+
+    has_more = len(rows) > limit
+    return rows[:limit], has_more

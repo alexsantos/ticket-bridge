@@ -202,3 +202,10 @@ class AuditLogOut(BaseModel):
     event_type: str
     detail: dict[str, Any]
     created_at: datetime
+
+
+class AuditLogPage(BaseModel):
+    items: list[AuditLogOut]
+    limit: int
+    offset: int
+    has_more: bool

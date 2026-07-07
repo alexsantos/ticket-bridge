@@ -262,15 +262,19 @@ document.getElementById("filter-conversations-topic").addEventListener("change",
 // ---------------------------------------------------------------------------
 // Audit
 // ---------------------------------------------------------------------------
+const AUDIT_PAGE_SIZE = 50;
+let auditOffset = 0;
+
 async function loadAudit() {
     const systemCode = document.getElementById("filter-audit-system").value;
-    const qs = systemCode ? `?system_code=${encodeURIComponent(systemCode)}` : "";
-    const resp = await fetch(`${API_BASE}/audit${qs}`);
-    const entries = await resp.json();
+    const params = new URLSearchParams({ limit: AUDIT_PAGE_SIZE, offset: auditOffset });
+    if (systemCode) params.set("system_code", systemCode);
+    const resp = await fetch(`${API_BASE}/audit?${params.toString()}`);
+    const page = await resp.json();
 
     const tbody = document.querySelector("#table-audit tbody");
     tbody.innerHTML = "";
-    for (const r of entries) {
+    for (const r of page.items) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>${formatDate(r.created_at)}</td>
@@ -281,9 +285,26 @@ async function loadAudit() {
         `;
         tbody.appendChild(tr);
     }
+
+    const pageNumber = Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1;
+    document.getElementById("audit-page-label").textContent =
+        page.items.length ? `Page ${pageNumber}` : "No entries";
+    document.getElementById("btn-audit-prev").disabled = auditOffset === 0;
+    document.getElementById("btn-audit-next").disabled = !page.has_more;
 }
 
-document.getElementById("filter-audit-system").addEventListener("change", loadAudit);
+document.getElementById("filter-audit-system").addEventListener("change", () => {
+    auditOffset = 0;
+    loadAudit();
+});
+document.getElementById("btn-audit-prev").addEventListener("click", () => {
+    auditOffset = Math.max(0, auditOffset - AUDIT_PAGE_SIZE);
+    loadAudit();
+});
+document.getElementById("btn-audit-next").addEventListener("click", () => {
+    auditOffset += AUDIT_PAGE_SIZE;
+    loadAudit();
+});
 
 // ---------------------------------------------------------------------------
 // Utilities

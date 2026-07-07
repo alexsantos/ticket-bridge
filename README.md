@@ -617,7 +617,8 @@ to the published image.
 - Human authentication for the frontend (IAP).
 - Alerts (e.g. Telegram, similar to other internal projects) when outbox
   entries reach `status = 'failed'`.
-- Pagination on the listing endpoints (`conversations`, `audit`) for higher
-  production volumes.
+- Pagination on `GET /api/v1/conversations` for higher production volumes
+  (`GET /api/v1/audit` already paginates - `limit`/`offset`, response
+  wrapped in `{items, limit, offset, has_more}`, see the "Audit" tab).
 - Webhook signature validation (HMAC) instead of just an API key, if any
   external system supports it.
