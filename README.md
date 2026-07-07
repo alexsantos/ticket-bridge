@@ -15,6 +15,27 @@ system, maintains the correlation (`conversation_id`), and distributes
 that ticket's **topic** (a mandatory category like `INFRA`, `SPM`, or
 `SALES` — see section 1).
 
+### A concrete example
+
+Two systems, one shared thread: a clinical system (`system_a`) flags that
+a patient has no insurance on file; a patient registration/insurance
+system (`system_b`) picks it up, verifies coverage, and reports back the
+confirmed insurance number - almost like a chat, via the shared
+`conversation_id`:
+
+```
+system_a → "Patient #4471 has no insurance on file"        (new)
+system_b → "On it - contacting the insurer now."           (in_progress)
+system_b → "The insurance number is now configured."       (resolved, metadata.insurance_number: "INS-2298104")
+system_a → "Confirmed, patient record updated. Closing."   (closed)
+```
+
+Every message, on every topic, uses the exact same fixed shape (see
+"Integration contract" below) - only the values, and whatever's in
+`metadata`, differ. See [`examples/README.md`](examples/README.md) for
+the full runnable walkthrough of this scenario, including a live-delivery
+demo that lets you watch a real payload arrive over HTTP.
+
 See **`CLAUDE.md`** for the full rationale behind the architecture decisions.
 
 ---
@@ -59,10 +80,10 @@ identical for every system, always:
   "conversation_id": "8a1ca7f4-0c8a-4e4d-843f-05c0ab201f07",
   "status": "new",
   "source_system": "system_a",
-  "source_ref": "TICKET-1001",
+  "source_ref": "CASE-4471",
   "external_ref": null,
-  "conversation_subject": "Print queue stuck on floor 3",
-  "metadata": {}
+  "conversation_subject": "Patient #4471 - no insurance on file",
+  "metadata": {"note": "Patient checked in without an insurance card - please verify coverage."}
 }
 ```
 
@@ -95,21 +116,27 @@ identical for every system, always:
 ```json
 {
   "conversation_id": "8a1ca7f4-0c8a-4e4d-843f-05c0ab201f07",
-  "external_ref": "INC-2001",
+  "external_ref": "INSVER-8842",
   "status": "resolved",
-  "topic_code": "INFRA",
-  "subject": "Print queue stuck on floor 3",
-  "metadata": {"insurance_number": "INS-2298104"}
+  "metadata": {
+    "insurance_number": "INS-2298104",
+    "note": "The insurance number is now configured."
+  }
 }
 ```
 
-`conversation_id` is omitted only when creating a brand-new ticket (in
-which case `topic_code` is required, and your system must be subscribed
-to it). `subject` and `metadata` are optional on every call - `subject` is
-only meaningful at creation, `metadata` travels with whichever specific
-update it's attached to. See [`examples/README.md`](examples/README.md)
-for a full worked walkthrough (two systems, both directions, plus a
-live-delivery demo you can run locally).
+This is `system_b` reporting the third message from "A concrete example"
+above - `conversation_id` is the thread `system_a` started; `external_ref`
+is `system_b`'s own case ref, reported back the first time it linked
+itself to this conversation. `conversation_id` is omitted only when
+creating a brand-new ticket (in which case `topic_code` is required, and
+your system must be subscribed to it - see `examples/README.md` step 1
+for that call). `subject` and `metadata` are optional on every call -
+`subject` is only meaningful at creation, `metadata` travels with
+whichever specific update it's attached to. See
+[`examples/README.md`](examples/README.md) for the full worked walkthrough
+(two systems, both directions, plus a live-delivery demo you can run
+locally).
 
 ---
 
@@ -192,6 +219,11 @@ ticket-bridge/
 │   └── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
 ├── tests/
 │   └── test_payload_builder.py
+├── examples/
+│   ├── README.md                # flagship walkthrough: patient insurance verification "chat"
+│   ├── walkthrough.sh           # runs the full scenario locally
+│   ├── live_delivery_demo.sh    # same, but with a real HTTP delivery you can watch
+│   └── mock_receiver.py         # tiny local webhook stand-in used by live_delivery_demo.sh
 ├── pyproject.toml               # project metadata and dependencies (uv)
 ├── uv.lock                      # pinned, reproducible dependency versions
 ├── .python-version              # Python version pinned for uv
