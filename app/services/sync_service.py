@@ -58,7 +58,6 @@ async def run_sync_batch() -> dict:
                 try:
                     await deliver(
                         base_url=destination_system["base_url"],
-                        auth_type=destination_system["auth_type"],
                         auth_config=destination_system["auth_config"],
                         payload=entry["payload"],
                         resolved_secret=resolved_secret,
@@ -94,7 +93,7 @@ async def run_sync_batch() -> dict:
 async def _get_system_config(conn, code: str) -> dict | None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT code, base_url, auth_type, auth_config, active FROM systems WHERE code = %(code)s",
+            "SELECT code, base_url, auth_config, active FROM systems WHERE code = %(code)s",
             {"code": code},
         )
         return await cur.fetchone()

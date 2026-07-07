@@ -216,7 +216,8 @@ ticket-bridge/
 ├── migrations/
 │   ├── 001_initial_schema.sql              # full schema, incl. topics/subscriptions (run first)
 │   ├── 002_seed_example.sql                # sample systems, topics, subscriptions (development only)
-│   └── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
+│   ├── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
+│   └── 004_unify_auth_mechanism.sql        # drops auth_type - one generic header-based auth mechanism
 ├── tests/
 │   └── test_payload_builder.py
 ├── examples/
@@ -265,6 +266,7 @@ createdb ticketbridge
 psql "postgresql://localhost/ticketbridge" -f migrations/001_initial_schema.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/002_seed_example.sql   # optional, sample data
 psql "postgresql://localhost/ticketbridge" -f migrations/003_standardize_ticket_status.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/004_unify_auth_mechanism.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -404,15 +406,19 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/001_initial_schema.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/003_standardize_ticket_status.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/004_unify_auth_mechanism.sql
 # (002_seed_example.sql is for development only - do not run in production)
 ```
 
 ### 4.3. Secrets (Secret Manager)
 
 Each external system has a secret reference (`secret_ref`) in its
-configuration — it's the value the dispatcher uses to authenticate
+`auth_config` — it's the value the dispatcher uses to authenticate
 outbound calls. The Cloud Scheduler shared secret and the DB password
-should also live here.
+should also live here. See section 4.7 for how `auth_config` as a whole
+is configured (there's a single generic mechanism, not a choice of auth
+types — see CLAUDE.md Decision 9).
 
 ```bash
 echo -n "DB_PASSWORD" | gcloud secrets create db-password --data-file=-
@@ -513,7 +519,27 @@ gcloud scheduler jobs create http ticket-bridge-sync \
 
 After deployment, access the frontend at `${SERVICE_URL}/` (authenticated
 via IAM — see the next section) and create the real systems in the
-"Systems" tab, with `secret_ref` pointing to the secrets created in 4.3.
+"Systems" tab.
+
+Outbound authentication is one generic mechanism (CLAUDE.md Decision 9),
+not a choice of types: if a system's `auth_config` has a `secret_ref`,
+the resolved secret is placed into a header — `auth_config.header`
+(defaults to `X-API-Key`), optionally prefixed with
+`auth_config.value_prefix`. The "Auth header name" / "Auth value prefix" /
+"Secret reference" fields on the Systems tab map directly onto this.
+Common patterns:
+
+| Pattern | Header name | Value prefix |
+|---|---|---|
+| Custom API key header (default) | *(leave blank → `X-API-Key`)* | *(leave blank)* |
+| Standard bearer token | `Authorization` | `Bearer ` (with a trailing space) |
+| Some other custom scheme | whatever the destination expects | whatever prefix it expects, if any |
+
+There's no built-in HTTP Basic Auth support — it needs a real
+`base64(username:password)` encoding step this project doesn't implement
+(see CLAUDE.md Decision 9); OAuth2 token exchange and HMAC request
+signing aren't supported either, for the same reason (not a config
+option, would need new code in `dispatcher.py`).
 
 ---
 

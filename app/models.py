@@ -22,7 +22,6 @@ class System(BaseModel):
     code: str
     name: str
     base_url: str
-    auth_type: Literal["api_key", "bearer", "basic"]
     auth_config: dict[str, Any]
     active: bool
     topics: list[str]

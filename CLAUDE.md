@@ -265,6 +265,44 @@ This was originally implemented as a per-system `on_create`/`on_update`
 payload-template mechanism; Decision 4 replaced that with one fixed shape
 for every destination, `event` included.
 
+## Decision 9 — One generic outbound authentication mechanism, not a choice of types
+
+**Superseded approach**: `systems.auth_type` was an enum (`api_key` |
+`bearer` | `basic`), each branch hardcoding how `dispatcher.deliver()`
+applied the resolved secret: `api_key` put it in a configurable header
+(default `X-API-Key`); `bearer` always used `Authorization: Bearer
+<secret>`; `basic` always used `Authorization: Basic <secret>`.
+
+**Why it was reversed**: answering a support question about how to
+configure Basic Auth surfaced that it never actually worked ergonomically
+- HTTP Basic Auth requires `Authorization: Basic base64("user:password")`,
+but the code did `f"Basic {resolved_secret}"` with no encoding step, so
+`secret_ref` had to resolve to an already-base64-encoded credential pair,
+pre-computed by hand, with nothing in the code, UI, or docs explaining
+that. Looking at the other two options while fixing this, `api_key` and
+`bearer` turned out to be doing the exact same thing - put a secret in a
+header - differing only in *which* header and whether there's a fixed
+string prefix on the value. Three enum branches for what's really one
+mechanism with two knobs was accidental complexity, not a real design
+requirement.
+
+**Decision made**: `systems.auth_type` is gone (dropped by migration
+`004_unify_auth_mechanism.sql`). There is one mechanism: if a secret is
+configured, it's placed into `auth_config['header']` (default
+`X-API-Key`), optionally prefixed with `auth_config['value_prefix']`
+(e.g. `"Bearer "`, with a trailing space, reproduces the old `bearer`
+behavior exactly; empty by default reproduces the old `api_key`
+behavior exactly). Basic Auth is dropped entirely rather than fixed -
+nothing in this project needs it today, and if it's needed later the
+right fix is a real `base64(username:password)` encoding step in
+`dispatcher.py`, not resurrecting a three-way enum.
+
+**What's still out of scope**: this only covers "secret in a header"
+schemes. A system requiring OAuth2 token exchange (fetch a short-lived
+token, then use it) or HMAC request signing would need real new code in
+`dispatcher.py`, not a config change - no worse off than before this
+decision, since none of the three original options covered those either.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Human authentication for the frontend**: the code does not implement

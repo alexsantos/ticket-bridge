@@ -44,7 +44,7 @@
                 <thead>
                     <tr>
                         <th>Code</th><th>Name</th><th>Base URL</th>
-                        <th>Auth</th><th>Topics</th><th>Active</th><th>Updated</th>
+                        <th>Topics</th><th>Active</th><th>Updated</th>
                     </tr>
                 </thead>
                 <tbody></tbody>
@@ -62,12 +62,11 @@
                     <label>Base URL (system's webhook endpoint)
                         <input type="url" name="base_url" required placeholder="https://.../webhook">
                     </label>
-                    <label>Authentication type
-                        <select name="auth_type">
-                            <option value="api_key">API Key (header)</option>
-                            <option value="bearer">Bearer Token</option>
-                            <option value="basic">Basic Auth</option>
-                        </select>
+                    <label>Auth header name (optional - defaults to X-API-Key)
+                        <input type="text" name="auth_header" placeholder="e.g. X-API-Key or Authorization">
+                    </label>
+                    <label>Auth value prefix (optional - e.g. "Bearer " with a trailing space, for a standard bearer token)
+                        <input type="text" name="auth_value_prefix" placeholder="e.g. Bearer ">
                     </label>
                     <label>Secret reference (name in Secret Manager / env var)
                         <input type="text" name="secret_ref" placeholder="e.g. system_c_outbound_key">

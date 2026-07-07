@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"])
 # codes via a correlated subquery, so list/get/create/update all return the
 # exact same fields without needing a GROUP BY.
 _SELECT_SYSTEM_COLUMNS = """
-    s.code, s.name, s.base_url, s.auth_type, s.active,
+    s.code, s.name, s.base_url, s.active,
     s.created_at, s.updated_at,
     COALESCE(
         (SELECT array_agg(topic_code ORDER BY topic_code)
@@ -61,9 +61,9 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                     await cur.execute(
                         """
                         INSERT INTO systems
-                            (code, name, base_url, auth_type, auth_config, active)
+                            (code, name, base_url, auth_config, active)
                         VALUES
-                            (%(code)s, %(name)s, %(base_url)s, %(auth_type)s, %(auth_config)s, %(active)s)
+                            (%(code)s, %(name)s, %(base_url)s, %(auth_config)s, %(active)s)
                         """,
                         payload.model_dump(mode="json"),
                     )

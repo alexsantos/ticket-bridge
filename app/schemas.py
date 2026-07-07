@@ -120,8 +120,12 @@ class SystemCreate(BaseModel):
     code: str
     name: str
     base_url: str
-    auth_type: Literal["api_key", "bearer", "basic"] = "api_key"
-    auth_config: dict[str, Any] = Field(default_factory=dict)
+    auth_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Outbound auth: optional 'header' (default 'X-API-Key'), optional "
+                    "'value_prefix' (e.g. 'Bearer ', for a standard bearer token), and "
+                    "'secret_ref'. See CLAUDE.md Decision 9.",
+    )
     active: bool = True
     topics: list[str] = Field(
         default_factory=list, description="Topic codes this system subscribes to."
@@ -131,7 +135,6 @@ class SystemCreate(BaseModel):
 class SystemUpdate(BaseModel):
     name: str | None = None
     base_url: str | None = None
-    auth_type: Literal["api_key", "bearer", "basic"] | None = None
     auth_config: dict[str, Any] | None = None
     active: bool | None = None
     topics: list[str] | None = None
@@ -141,7 +144,6 @@ class SystemOut(BaseModel):
     code: str
     name: str
     base_url: str
-    auth_type: str
     active: bool
     topics: list[str]
     created_at: datetime

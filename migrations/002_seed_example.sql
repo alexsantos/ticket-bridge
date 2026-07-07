@@ -27,13 +27,12 @@ VALUES
         || 'note (string, free-text human comment, optional on every event) and '
         || 'insurance_number (string, set by system_b when resolving a coverage verification case).');
 
-INSERT INTO systems (code, name, base_url, auth_type, auth_config, active)
+INSERT INTO systems (code, name, base_url, auth_config, active)
 VALUES
 (
     'system_a',
     'Clinical Team ServiceDesk (example)',
     'https://system-a.example.local/api/tickets/webhook',
-    'api_key',
     '{"header": "X-API-Key", "secret_ref": "system_a_outbound_key"}',
     TRUE
 ),
@@ -41,8 +40,7 @@ VALUES
     'system_b',
     'Patient Registration & Insurance (example)',
     'https://system-b.example.local/api/v2/patient-cases/hook',
-    'bearer',
-    '{"secret_ref": "system_b_outbound_token"}',
+    '{"header": "Authorization", "value_prefix": "Bearer ", "secret_ref": "system_b_outbound_token"}',
     TRUE
 );
 

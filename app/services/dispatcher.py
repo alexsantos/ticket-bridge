@@ -2,8 +2,8 @@
 dispatcher.py
 -------------
 Responsible for physically delivering (via HTTP) an outbox entry to the
-destination system, applying the authentication type configured for that
-system (systems.auth_type / auth_config).
+destination system, applying the header-based authentication configured
+for that system (systems.auth_config).
 
 Isolated from the rest of the synchronization logic (api/sync.py) so that
 the details of "how to speak HTTP to this system" don't spread across the
@@ -26,13 +26,21 @@ class DeliveryError(Exception):
 async def deliver(
     *,
     base_url: str,
-    auth_type: str,
     auth_config: dict[str, Any],
     payload: dict[str, Any],
     resolved_secret: str | None,
 ) -> None:
     """
     Sends the payload to the destination system.
+
+    Authentication is a single generic mechanism, not a choice of types:
+    if `resolved_secret` is set, it's placed into a header -
+    `auth_config['header']` (default 'X-API-Key'), optionally prefixed
+    with `auth_config['value_prefix']` (e.g. 'Bearer ', with a trailing
+    space, for a standard bearer token; empty by default). This covers
+    any "secret in a header" scheme - see CLAUDE.md Decision 9. Schemes
+    that need something else (OAuth2 token exchange, HMAC request
+    signing) aren't supported today.
 
     `resolved_secret` is the already-resolved value of the secret
     referenced in auth_config['secret_ref'] (see secrets.py) - the
@@ -41,13 +49,10 @@ async def deliver(
     settings = get_settings()
     headers = {"Content-Type": "application/json"}
 
-    if auth_type == "api_key" and resolved_secret:
+    if resolved_secret:
         header_name = auth_config.get("header", "X-API-Key")
-        headers[header_name] = resolved_secret
-    elif auth_type == "bearer" and resolved_secret:
-        headers["Authorization"] = f"Bearer {resolved_secret}"
-    elif auth_type == "basic" and resolved_secret:
-        headers["Authorization"] = f"Basic {resolved_secret}"
+        value_prefix = auth_config.get("value_prefix", "")
+        headers[header_name] = f"{value_prefix}{resolved_secret}"
 
     try:
         async with httpx.AsyncClient(timeout=settings.outbound_timeout_seconds) as client:

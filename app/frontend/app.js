@@ -150,7 +150,6 @@ async function loadSystems() {
             <td><code>${s.code}</code></td>
             <td>${s.name}</td>
             <td>${s.base_url}</td>
-            <td>${s.auth_type}</td>
             <td>${(s.topics || []).join(", ") || "—"}</td>
             <td><span class="badge ${s.active ? "active" : "inactive"}">${s.active ? "Active" : "Inactive"}</span></td>
             <td>${formatDate(s.updated_at)}</td>
@@ -184,8 +183,10 @@ function openSystemDialog(system) {
         systemForm.code.value = system.code;
         systemForm.name.value = system.name;
         systemForm.base_url.value = system.base_url;
-        systemForm.auth_type.value = system.auth_type;
         systemForm.active.checked = system.active;
+        // auth_config (header/value_prefix/secret_ref) is intentionally never
+        // returned by the API (may reference secrets), so these fields always
+        // start blank when editing - re-enter them to change auth config.
     }
     renderSystemTopicsCheckboxes(system ? system.topics : []);
     systemDialog.showModal();
@@ -198,11 +199,16 @@ systemForm.addEventListener("submit", async () => {
         document.querySelectorAll("#system-topics-checkboxes input[type=checkbox]:checked")
     ).map((el) => el.value);
 
+    const authConfig = { secret_ref: data.get("secret_ref") || null };
+    const authHeader = data.get("auth_header");
+    if (authHeader) authConfig.header = authHeader;
+    const authValuePrefix = data.get("auth_value_prefix");
+    if (authValuePrefix) authConfig.value_prefix = authValuePrefix;
+
     const body = {
         name: data.get("name"),
         base_url: data.get("base_url"),
-        auth_type: data.get("auth_type"),
-        auth_config: { secret_ref: data.get("secret_ref") || null },
+        auth_config: authConfig,
         active: systemForm.active.checked,
         topics: topics,
     };

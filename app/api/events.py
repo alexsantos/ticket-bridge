@@ -147,9 +147,10 @@ async def _get_topic(conn, code: str) -> dict | None:
 
 
 async def _get_system_config(conn, code: str) -> dict | None:
+    """Only `active` is actually consulted here - delivery (base_url/auth_config) happens later, in sync_service.py."""
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT code, base_url, auth_type, auth_config, active FROM systems WHERE code = %(code)s",
+            "SELECT code, active FROM systems WHERE code = %(code)s",
             {"code": code},
         )
         return await cur.fetchone()
