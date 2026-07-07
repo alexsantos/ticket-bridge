@@ -66,6 +66,26 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+class RevalidatingStaticFiles(StaticFiles):
+    """
+    Adds `Cache-Control: no-cache` to every static frontend response, so
+    browsers always revalidate (via the ETag/Last-Modified StaticFiles
+    already sets) instead of blindly reusing a stale app.js/style.css.
+
+    This project has no frontend build step (CLAUDE.md Decision 7), so
+    there's no filename hashing to bust caches automatically on deploy -
+    without this, a browser can keep running old JS against a newer API
+    indefinitely (this is exactly what happened investigating a "the Audit
+    tab shows no values" report: the API had changed shape, but the
+    browser never re-fetched app.js to find out).
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["cache-control"] = "no-cache"
+        return response
+
+
 # Static configuration and audit frontend (see app/frontend/).
 _frontend_dir = Path(__file__).parent / "frontend"
-app.mount("/", StaticFiles(directory=_frontend_dir, html=True), name="frontend")
+app.mount("/", RevalidatingStaticFiles(directory=_frontend_dir, html=True), name="frontend")
