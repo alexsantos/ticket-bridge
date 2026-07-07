@@ -346,9 +346,13 @@ docker run -d --name ticket-bridge \
     -p 8080:8080 \
     -e DATABASE_URL="postgresql://ticketbridge:PASSWORD@your-postgres-host:5432/ticketbridge" \
     -e SCHEDULER_SHARED_SECRET="$(openssl rand -base64 32)" \
-    -e SYSTEM_A_OUTBOUND_KEY="..." \
+    -e system_a_outbound_key="..." \
     ticket-bridge
 ```
+
+`system_a_outbound_key` above must match that system's `auth_config.secret_ref`
+value *exactly*, including case - secret resolution does a case-sensitive
+lookup (see `app/services/secrets.py`).
 
 Run the migrations against that same `DATABASE_URL` first (section 3.2,
 step 4). `SYNC_SCHEDULER_ENABLED` defaults to `true`, so outbox processing
@@ -425,7 +429,7 @@ echo -n "DB_PASSWORD" | gcloud secrets create db-password --data-file=-
 echo -n "$(openssl rand -base64 32)" | gcloud secrets create scheduler-shared-secret --data-file=-
 
 # One secret per external system, name matching the 'secret_ref' configured
-# in the frontend for that system:
+# in the frontend for that system (case-sensitive - see section 3.5):
 echo -n "SYSTEM_A_OUTBOUND_KEY" | gcloud secrets create system_a_outbound_key --data-file=-
 echo -n "SYSTEM_B_OUTBOUND_TOKEN" | gcloud secrets create system_b_outbound_token --data-file=-
 ```

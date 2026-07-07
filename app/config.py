@@ -9,7 +9,19 @@ Do not put secrets with default values here; the defaults are only meant
 for local development.
 """
 from functools import lru_cache
+
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# pydantic-settings' own `env_file` support (below) only populates this
+# class's declared fields - it does not write into the real process
+# os.environ. Anything that reads os.environ directly (e.g.
+# app/services/secrets.py's local-mode secret_ref lookup, which needs to
+# work for arbitrary per-system secret names that aren't declared Settings
+# fields) would otherwise never see a value that only exists in .env.
+# override=False (the default) means a real env var - a container's -e
+# flag, a CI secret - always wins over .env.
+load_dotenv()
 
 
 class Settings(BaseSettings):

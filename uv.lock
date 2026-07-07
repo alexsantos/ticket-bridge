@@ -928,6 +928,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -947,6 +948,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary", "pool"], specifier = "==3.3.4" },
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "pydantic-settings", specifier = "==2.14.2" },
+    { name = "python-dotenv", specifier = "==1.2.2" },
     { name = "python-multipart", specifier = "==0.0.32" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.50.2" },
 ]
