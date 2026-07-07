@@ -97,6 +97,7 @@ async def receive_event(
                     source_ref=event.external_ref,
                     external_ref=destination_row["external_ref"],
                     conversation_subject=conversation_subject,
+                    metadata=event.metadata,
                 )
 
                 outbox_id = await outbox_service.enqueue(

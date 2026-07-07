@@ -59,7 +59,14 @@ class IncomingEvent(BaseModel):
         description="Codes of the systems to notify. If omitted, notifies "
                      "every system currently subscribed to the conversation's topic.",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Free-form structured data relevant to this specific update (e.g. "
+                    "a confirmed insurance number, a resolution note) - forwarded as-is "
+                    "to every fan-out destination in this event's OutboundTicketEvent. "
+                    "Not accumulated across the conversation; each event's metadata "
+                    "stands on its own, like a message in a chat.",
+    )
 
 
 class IncomingEventResponse(BaseModel):
@@ -88,6 +95,12 @@ class OutboundTicketEvent(BaseModel):
                     "(the destination has none yet); always present on 'ticket.updated'.",
     )
     conversation_subject: str | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Structured data the source system attached to this specific update "
+                    "(see IncomingEvent.metadata) - e.g. a confirmed insurance number. "
+                    "Forwarded as-is; the bridge does not interpret its contents.",
+    )
 
 
 # ---------------------------------------------------------------------------

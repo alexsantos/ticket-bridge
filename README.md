@@ -61,7 +61,8 @@ identical for every system, always:
   "source_system": "system_a",
   "source_ref": "TICKET-1001",
   "external_ref": null,
-  "conversation_subject": "Print queue stuck on floor 3"
+  "conversation_subject": "Print queue stuck on floor 3",
+  "metadata": {}
 }
 ```
 
@@ -75,6 +76,16 @@ identical for every system, always:
 - `external_ref`: **your own** ticket ID for this conversation, once
   known - report it via `POST /api/v1/events` (below) so future updates
   include it.
+- `metadata`: whatever structured data *you* attached to *your own* update
+  via `POST /api/v1/events` (below) - forwarded as-is, per event, not
+  accumulated across the conversation. This is where actual business data
+  travels (e.g. a confirmed insurance number, a resolution note) - the
+  bridge only enforces the shape around it (`status`, the IDs), never the
+  contents of `metadata` itself. Two systems on the same topic need to
+  agree between themselves on what keys they expect to find here - **check
+  that topic's `description`** (`GET /api/v1/topics/{code}`, or the
+  "Topics" tab) first; that's the documented (not enforced) contract for
+  `metadata` on that topic. See CLAUDE.md Decision 4.
 
 ### Reporting your own ticket / status changes
 
@@ -85,18 +96,20 @@ identical for every system, always:
 {
   "conversation_id": "8a1ca7f4-0c8a-4e4d-843f-05c0ab201f07",
   "external_ref": "INC-2001",
-  "status": "new",
+  "status": "resolved",
   "topic_code": "INFRA",
-  "subject": "Print queue stuck on floor 3"
+  "subject": "Print queue stuck on floor 3",
+  "metadata": {"insurance_number": "INS-2298104"}
 }
 ```
 
 `conversation_id` is omitted only when creating a brand-new ticket (in
 which case `topic_code` is required, and your system must be subscribed
-to it). `subject` is only used at creation. See
-[`examples/README.md`](examples/README.md) for a full worked walkthrough
-(two systems, both directions, plus a live-delivery demo you can run
-locally).
+to it). `subject` and `metadata` are optional on every call - `subject` is
+only meaningful at creation, `metadata` travels with whichever specific
+update it's attached to. See [`examples/README.md`](examples/README.md)
+for a full worked walkthrough (two systems, both directions, plus a
+live-delivery demo you can run locally).
 
 ---
 

@@ -2,10 +2,17 @@
 -- 002_seed_example.sql
 --
 -- Sample data, useful only in a development/test environment.
--- DO NOT run in production. Creates two fictitious systems, three example
+-- DO NOT run in production. Creates two fictitious systems, four example
 -- topics, and their subscriptions, to allow testing the end-to-end flow
 -- (including proactive fan-out to a topic's subscribers) locally before
 -- configuring the real systems.
+--
+-- PATIENT_ADMIN models this project's flagship use case: system_a (a
+-- clinical team) and system_b (patient registration/insurance) exchange
+-- updates on a patient's insurance verification almost like a chat, via
+-- the shared conversation_id - see examples/README.md for the full
+-- walkthrough. INFRA/SPM/SALES remain as simpler generic examples (see
+-- README.md section 3.3).
 -- =============================================================================
 
 BEGIN;
@@ -14,7 +21,11 @@ INSERT INTO topics (code, name, description)
 VALUES
     ('INFRA', 'Infrastructure', 'Network, servers, and workstation issues'),
     ('SPM', 'Service & Project Management', 'Project coordination and service requests'),
-    ('SALES', 'Sales', 'Sales team requests and customer escalations');
+    ('SALES', 'Sales', 'Sales team requests and customer escalations'),
+    ('PATIENT_ADMIN', 'Patient Administration', 'Patient registration, insurance verification, and admissions coordination. '
+        || 'Expected metadata keys (not enforced by the bridge - see README.md "Integration contract"): '
+        || 'note (string, free-text human comment, optional on every event) and '
+        || 'insurance_number (string, set by system_b when resolving a coverage verification case).');
 
 INSERT INTO systems (code, name, base_url, auth_type, auth_config, active)
 VALUES
@@ -28,21 +39,24 @@ VALUES
 ),
 (
     'system_b',
-    'Infrastructure Team ITSM (example)',
-    'https://system-b.example.local/api/v2/incidents/hook',
+    'Patient Registration & Insurance (example)',
+    'https://system-b.example.local/api/v2/patient-cases/hook',
     'bearer',
     '{"secret_ref": "system_b_outbound_token"}',
     TRUE
 );
 
--- system_a subscribes only to INFRA; system_b subscribes to INFRA and SPM.
--- This means creating an INFRA ticket as system_a immediately fans out to
--- system_b (it's subscribed), while a SALES ticket would reach neither.
+-- system_a subscribes to INFRA and PATIENT_ADMIN; system_b subscribes to
+-- INFRA, SPM, and PATIENT_ADMIN. This means creating a PATIENT_ADMIN
+-- ticket as system_a immediately fans out to system_b (it's subscribed),
+-- while a SALES ticket would reach neither.
 INSERT INTO system_topic_subscriptions (system_code, topic_code)
 VALUES
     ('system_a', 'INFRA'),
+    ('system_a', 'PATIENT_ADMIN'),
     ('system_b', 'INFRA'),
-    ('system_b', 'SPM');
+    ('system_b', 'SPM'),
+    ('system_b', 'PATIENT_ADMIN');
 
 -- Sample inbound keys (SHA-256 hash of "dev-key-system-a" / "dev-key-system-b").
 -- Generate real keys with: python -c "import secrets,hashlib; k=secrets.token_urlsafe(32); print(k, hashlib.sha256(k.encode()).hexdigest())"

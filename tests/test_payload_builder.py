@@ -26,6 +26,7 @@ def test_ticket_created_has_no_external_ref():
         source_ref="TICKET-1001",
         external_ref="whatever-was-passed-in",
         conversation_subject="Print queue stuck",
+        metadata={},
     )
     assert payload.event == "ticket.created"
     assert payload.external_ref is None
@@ -40,9 +41,24 @@ def test_ticket_updated_has_external_ref():
         source_ref="TICKET-1001",
         external_ref="INC-2001",
         conversation_subject="Print queue stuck",
+        metadata={},
     )
     assert payload.event == "ticket.updated"
     assert payload.external_ref == "INC-2001"
+
+
+def test_metadata_is_forwarded_as_is():
+    payload = build_outbound_payload(
+        is_known_participant=True,
+        conversation_id=CONVERSATION_ID,
+        status=CanonicalStatus.RESOLVED,
+        source_system="system_b",
+        source_ref="INSVER-8842",
+        external_ref="CASE-4471",
+        conversation_subject="Patient #4471 - no insurance on file",
+        metadata={"insurance_number": "INS-2298104"},
+    )
+    assert payload.metadata == {"insurance_number": "INS-2298104"}
 
 
 def test_incoming_event_accepts_canonical_status():

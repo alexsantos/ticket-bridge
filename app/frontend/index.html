@@ -116,8 +116,10 @@
                     <label>Name
                         <input type="text" name="name" required placeholder="e.g. Infrastructure">
                     </label>
-                    <label>Description
-                        <input type="text" name="description" placeholder="optional">
+                    <label>Description (also document expected `metadata` keys for
+                        events on this topic here - see README.md "Integration contract";
+                        the bridge does not enforce this, it's for integrating teams)
+                        <input type="text" name="description" placeholder="e.g. Expected metadata: note (string), insurance_number (string)">
                     </label>
                     <label class="checkbox">
                         <input type="checkbox" name="active" checked> Active

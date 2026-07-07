@@ -53,11 +53,11 @@ curl -s -X PATCH "$BASE_URL/api/v1/systems/system_b" \
   -d "{\"base_url\": \"http://localhost:$RECEIVER_PORT/webhook\"}" | json
 
 echo
-echo "==> Creating an INFRA ticket as system_a"
+echo "==> Flagging a patient with no insurance on file, as system_a"
 RESPONSE=$(curl -s -X POST "$BASE_URL/api/v1/events" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-key-system-a" \
-  -d '{"external_ref": "TICKET-LIVE-1", "status": "new", "subject": "Live demo ticket", "topic_code": "INFRA"}')
+  -d '{"external_ref": "CASE-LIVE-1", "status": "new", "subject": "Patient #9001 - no insurance on file", "topic_code": "PATIENT_ADMIN", "metadata": {"note": "Patient checked in without an insurance card - please verify coverage."}}')
 echo "$RESPONSE" | json
 
 echo

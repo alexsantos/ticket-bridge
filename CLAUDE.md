@@ -149,6 +149,40 @@ contract is the same size regardless of how many systems join. The cost
 moved from "bridge configuration, per system" to "each system's own
 integration code," which is exactly where the user wants it.
 
+**Update — `metadata` passthrough**: the first version of this decision
+also dropped `IncomingEvent.metadata` from the outbound contract entirely
+(it was accepted on input but only ever recorded in `audit_log`, never
+forwarded), reasoning that untyped passthrough would recreate the same
+per-integration drift this decision removes. That reasoning held only as
+long as no concrete use actually needed it. The flagship use case
+(`examples/README.md` — a clinical system and a patient-registration/
+insurance system exchanging updates on a single case almost like a chat)
+made the gap obvious: `system_b` finds a patient's insurance number and
+has no way to hand it to `system_a` — only `status` crosses the bridge,
+never the actual result of the work. So `OutboundTicketEvent` now carries
+`metadata` too, forwarded from `IncomingEvent.metadata` as-is, per event
+(not accumulated across the conversation - each message's metadata stands
+alone, same as `status` does). This keeps the *shape* fixed (every
+destination still gets the same top-level fields, always) while letting
+the *contents* of `metadata` be whatever the two teams on either side of a
+given topic agree to put there - the bridge itself never interprets it.
+
+**Where that agreement is recorded**: since the bridge deliberately does
+not validate `metadata`'s contents, there has to be *somewhere* the two
+integrating teams write down which keys they expect (e.g. `insurance_number`,
+`note`) - otherwise it's tribal knowledge. That place is the topic's own
+`description` field (`topics.description`, editable via the "Topics" tab
+or `PATCH /api/v1/topics/{code}`, visible to any integrating team via
+`GET /api/v1/topics`) - see the seeded `PATIENT_ADMIN` topic in
+`002_seed_example.sql` for the convention. This is documentation, not
+enforcement: nothing rejects a call that omits or misspells an expected
+key. If that turns out not to be enough, the natural next step is a
+per-topic JSON Schema column that the bridge actually validates `metadata`
+against - deliberately not implemented yet, since it reintroduces a
+configuration surface and should only be added once there's a concrete
+need for it, the same reasoning `metadata` passthrough itself only
+existed once a concrete need appeared.
+
 ## Decision 5 — Loop prevention
 
 Each `outbox` row explicitly records `source` (who generated the event)
