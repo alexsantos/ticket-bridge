@@ -8,9 +8,13 @@ In production (GCP): the value is read from Secret Manager, with an
 in-memory cache per process (the Cloud Run process is recreated often, so
 the cache never stays stale for long).
 
-In local development: falls back to an environment variable with the same
-name as the secret_ref, so Secret Manager doesn't need to be available
-locally.
+In local development: falls back to an environment variable named
+`secret_ref.upper()`, so Secret Manager doesn't need to be available
+locally. Uppercased because secret_ref values follow Secret Manager's
+own lowercase-with-underscores convention (e.g. `system_a_outbound_key`),
+while .env files conventionally use SCREAMING_SNAKE_CASE - env var names
+are case-sensitive, so this mapping has to be explicit rather than an
+exact-string match.
 
 See README.md, section "Secrets", for instructions on creating secrets in
 Secret Manager and granting access to the Cloud Run service account.
@@ -39,16 +43,20 @@ def resolve_secret(secret_ref: str) -> str | None:
     """
     Resolves a secret_ref to its value.
 
-    - environment == 'local': reads from os.environ[secret_ref].
+    - environment == 'local': reads from os.environ[secret_ref.upper()].
     - otherwise: reads the 'latest' version of the matching secret in the
       current GCP project's Secret Manager (GOOGLE_CLOUD_PROJECT).
     """
     settings = get_settings()
 
     if settings.environment == "local":
-        value = os.environ.get(secret_ref)
+        env_var_name = secret_ref.upper()
+        value = os.environ.get(env_var_name)
         if value is None:
-            logger.warning("Secret '%s' not found in local environment variables.", secret_ref)
+            logger.warning(
+                "Secret '%s' not found in local environment variables (expected %s).",
+                secret_ref, env_var_name,
+            )
         return value
 
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")

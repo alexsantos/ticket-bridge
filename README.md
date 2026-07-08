@@ -346,13 +346,14 @@ docker run -d --name ticket-bridge \
     -p 8080:8080 \
     -e DATABASE_URL="postgresql://ticketbridge:PASSWORD@your-postgres-host:5432/ticketbridge" \
     -e SCHEDULER_SHARED_SECRET="$(openssl rand -base64 32)" \
-    -e system_a_outbound_key="..." \
+    -e SYSTEM_A_OUTBOUND_KEY="..." \
     ticket-bridge
 ```
 
-`system_a_outbound_key` above must match that system's `auth_config.secret_ref`
-value *exactly*, including case - secret resolution does a case-sensitive
-lookup (see `app/services/secrets.py`).
+`SYSTEM_A_OUTBOUND_KEY` above is that system's `auth_config.secret_ref`
+(`system_a_outbound_key`), UPPERCASED - secret resolution does
+`secret_ref.upper()` when reading from the environment (see
+`app/services/secrets.py`).
 
 Run the migrations against that same `DATABASE_URL` first (section 3.2,
 step 4). `SYNC_SCHEDULER_ENABLED` defaults to `true`, so outbox processing
@@ -428,10 +429,11 @@ types — see CLAUDE.md Decision 9).
 echo -n "DB_PASSWORD" | gcloud secrets create db-password --data-file=-
 echo -n "$(openssl rand -base64 32)" | gcloud secrets create scheduler-shared-secret --data-file=-
 
-# One secret per external system, name matching the 'secret_ref' configured
-# in the frontend for that system (case-sensitive - see section 3.5):
-echo -n "SYSTEM_A_OUTBOUND_KEY" | gcloud secrets create system_a_outbound_key --data-file=-
-echo -n "SYSTEM_B_OUTBOUND_TOKEN" | gcloud secrets create system_b_outbound_token --data-file=-
+# One secret per external system, named exactly like the 'secret_ref'
+# configured in the frontend for that system (Secret Manager lookups use
+# secret_ref as-is, unlike the local .env fallback - see section 3.5):
+echo -n "REPLACE_WITH_REAL_KEY_VALUE" | gcloud secrets create system_a_outbound_key --data-file=-
+echo -n "REPLACE_WITH_REAL_TOKEN_VALUE" | gcloud secrets create system_b_outbound_token --data-file=-
 ```
 
 ### 4.4. Dedicated service account
