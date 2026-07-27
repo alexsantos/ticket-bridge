@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/alexsantos/ticket-bridge/actions/workflows/tests.yml/badge.svg)](https://github.com/alexsantos/ticket-bridge/actions/workflows/tests.yml)
 [![Docker image](https://github.com/alexsantos/ticket-bridge/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/alexsantos/ticket-bridge/pkgs/container/ticket-bridge)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Lightweight ticket correlation service across multiple support applications,
 designed to replace the "central hub" role that OSTicket used to play
@@ -654,3 +655,7 @@ to the published image.
   wrapped in `{items, limit, offset, has_more}`, see the "Audit" tab).
 - Webhook signature validation (HMAC) instead of just an API key, if any
   external system supports it.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
