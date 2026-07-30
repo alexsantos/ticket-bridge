@@ -465,11 +465,16 @@ target from a variable (e.g. `set $upstream http://...; proxy_pass
 $upstream;`, often done for lazy/runtime DNS resolution) - a variable
 target disables nginx's usual "replace the matched location prefix"
 behavior entirely, regardless of a trailing slash on the target. Fix by
-adding an explicit rewrite before `proxy_pass`:
+adding an explicit rewrite before `proxy_pass` - **`set` must come
+*before* `rewrite ... break;`, not after**: `break` halts processing of
+every remaining rewrite-module directive in the block for that request,
+`set` included, so a `set $upstream ...;` placed after `break` never
+runs, leaving `$upstream` empty (nginx error log: `using uninitialized
+"upstream" variable` / `invalid URL prefix in ""`, a 500 to the client):
 ```nginx
 location /ticket-bridge/ {
-    rewrite ^/ticket-bridge/(.*)$ /$1 break;
     set $upstream http://127.0.0.1:8080;
+    rewrite ^/ticket-bridge/(.*)$ /$1 break;
     proxy_pass $upstream;
     ...
 }
