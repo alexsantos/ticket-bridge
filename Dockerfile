@@ -31,4 +31,14 @@ ENV PATH="/app/.venv/bin:${PATH}"
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# Set when running behind a reverse proxy that mounts the app under a
+# path prefix (e.g. HAProxy serving this at /ticket-bridge and stripping
+# that prefix before forwarding - see README.md section 3.6.1). Empty by
+# default (app served at the domain root). Passed to uvicorn's
+# --root-path, which only fixes ASGI-level path generation (OpenAPI
+# "servers", redirects) - app/frontend/*.js and *.html use paths relative
+# to their own document, not absolute ones, specifically so they keep
+# working unmodified under any prefix the proxy strips.
+ENV ROOT_PATH=""
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --root-path \"${ROOT_PATH}\""]

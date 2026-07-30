@@ -410,6 +410,35 @@ docker compose down       # stop, keep the db volume
 docker compose down -v    # stop and wipe the db volume too
 ```
 
+#### 3.6.1. Behind a reverse proxy under a path prefix
+
+`docker-compose.yml`'s `ROOT_PATH` (default `/ticket-bridge`) is for
+running behind a reverse proxy (e.g. HAProxy) that mounts the app under a
+path prefix instead of at the domain root - a `path_beg /ticket-bridge`
+ACL routing to this container's port 8080, with the prefix stripped
+before forwarding (HAProxy: `http-request set-path
+%[path,regsub(^/ticket-bridge,)]`), and a redirect adding the trailing
+slash when it's missing so relative asset paths resolve correctly (see
+below).
+
+`ROOT_PATH` is passed to uvicorn's `--root-path` (see `Dockerfile`),
+which fixes ASGI-level path generation - the OpenAPI `servers` entry,
+redirects Starlette itself issues - so `/docs` works correctly under the
+prefix. That alone isn't sufficient, though: `app/frontend/index.html`
+and `app.js` reference their own assets and the API with paths relative
+to the current document (`style.css`, `app.js`, `api/v1/...`, `health` -
+no leading `/`), specifically so they keep working unmodified under
+whatever prefix the proxy strips, without the app needing to know the
+prefix to render its own HTML - only the browser's URL bar needs to end
+in `/ticket-bridge/` (with the trailing slash) for that relative
+resolution to land on the right path.
+
+Override the default with a `.env` file next to `docker-compose.yml`
+(`ROOT_PATH=/other-prefix`) or an exported shell variable before `docker
+compose up`; set it to an empty string to serve at the domain root
+instead (no proxy prefix). The same `ROOT_PATH` env var works with
+`docker run` too (section 3.5).
+
 ---
 
 ## 4. Deploying to GCP (production)

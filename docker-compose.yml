@@ -23,6 +23,13 @@
 # matters on a server that already runs other Postgres containers/instances
 # on 5432: there's no host port to collide with, and nothing outside this
 # compose project's own network can reach this database directly.
+#
+# ROOT_PATH: set when a reverse proxy (e.g. HAProxy) mounts the app under
+# a path prefix rather than at the domain root - see README.md section
+# 3.6.1. Defaults to /ticket-bridge below; override by exporting
+# ROOT_PATH before `docker compose up` (or in a `.env` file next to this
+# one, which compose loads automatically), or set it to an empty string
+# to serve at the domain root instead.
 
 networks:
   ticket-bridge:
@@ -66,6 +73,7 @@ services:
       SCHEDULER_SHARED_SECRET: a-long-random-key-for-local-use-only
       LOG_LEVEL: INFO
       ENVIRONMENT: local
+      ROOT_PATH: ${ROOT_PATH:-/ticket-bridge}
       # Matches migrations/002_seed_example.sql's seeded secret_ref values
       # (see .env.example and app/services/secrets.py) - replace for
       # anything beyond local/dev use.

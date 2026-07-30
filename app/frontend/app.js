@@ -12,7 +12,7 @@
  * frontend security" section.
  */
 
-const API_BASE = "/api/v1";
+const API_BASE = "api/v1";
 
 let allTopics = [];
 
@@ -325,7 +325,7 @@ function formatDate(iso) {
 (async function start() {
     const statusEl = document.getElementById("connection-status");
     try {
-        await fetch("/health").then((r) => r.json());
+        await fetch("health").then((r) => r.json());
         statusEl.textContent = "Connected to the service.";
         await loadTopics();
         await loadSystems();
