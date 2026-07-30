@@ -450,6 +450,62 @@ slash) for that relative resolution to land on the right path.
 no proxy in front of it locally, so `ROOT_PATH` only matters for the
 containerized app (`docker run` - section 3.5 - or `docker compose`).
 
+#### 3.6.2. Troubleshooting
+
+**404s on every path, proxied requests still show the prefix in the
+logs** (`app` logs `GET /ticket-bridge/... 404`, or even
+`GET //ticket-bridge/...` with a doubled slash): the reverse proxy isn't
+actually stripping the path prefix before forwarding - `ROOT_PATH`
+(section 3.6.1) can't compensate for this, since it only affects URLs the
+app *generates* (OpenAPI, redirects), never how it parses an *incoming*
+request. The app is mounted at `/`, so any request that still has
+`/ticket-bridge` in it 404s. With nginx specifically, this happens even
+with a `location /ticket-bridge/ { ... }` block if `proxy_pass` gets its
+target from a variable (e.g. `set $upstream http://...; proxy_pass
+$upstream;`, often done for lazy/runtime DNS resolution) - a variable
+target disables nginx's usual "replace the matched location prefix"
+behavior entirely, regardless of a trailing slash on the target. Fix by
+adding an explicit rewrite before `proxy_pass`:
+```nginx
+location /ticket-bridge/ {
+    rewrite ^/ticket-bridge/(.*)$ /$1 break;
+    set $upstream http://127.0.0.1:8080;
+    proxy_pass $upstream;
+    ...
+}
+```
+`break` stops nginx from re-running location matching against the
+rewritten URI; since `proxy_pass $upstream` has no URI part of its own,
+it forwards the now-stripped `$uri` instead of the original request path.
+(With HAProxy: `http-request set-path %[path,regsub(^/ticket-bridge,)]`,
+as in section 3.6.1.) Note that a plain prefix `location /ticket-bridge/`
+block only matches requests that already include the trailing slash - add
+`location = /ticket-bridge { return 301 /ticket-bridge/; }` if you want
+the bare path (no trailing slash) to work too.
+
+**`psycopg.errors.UndefinedTable: relation "outbox" does not exist`**
+(or any other core table) on `app` startup or the first scheduled sync:
+the migrations never ran. `db`'s schema comes entirely from the numbered
+`*.sql` files bind-mounted into `/docker-entrypoint-initdb.d` (section
+3.6) - Postgres only executes those on the *very first* boot against a
+truly empty `db_data` volume, and never retries. If you deployed by
+copying just `docker-compose.yml` (+ `.env`) to a server rather than the
+whole repo, `./migrations` won't exist there - and because that's a bind
+mount, Compose silently creates an *empty* directory for the missing
+source instead of erroring, so Postgres initializes with zero init
+scripts to run. Fix: copy this repo's `migrations/*.sql` files (all four:
+`001_initial_schema.sql`, `002_seed_example.sql`,
+`003_standardize_ticket_status.sql`, `004_unify_auth_mechanism.sql`) to
+that same path next to `docker-compose.yml` on the server, then wipe the
+already-initialized (but schema-less) volume and let it redo first-boot
+init:
+```bash
+docker compose down -v
+docker compose up -d
+docker compose logs db | grep -i "CREATE TABLE"   # confirm the migrations actually ran
+curl -s http://localhost:8080/api/v1/topics       # should list the seeded topics
+```
+
 ---
 
 ## 4. Deploying to GCP (production)
