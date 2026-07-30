@@ -3,7 +3,7 @@ name = "ticket-bridge"
 version = "0.4.0"
 description = "Ticket correlation service across multiple support applications."
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi==0.139.0",
     "uvicorn[standard]==0.50.2",

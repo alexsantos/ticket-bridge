@@ -1,0 +1,79 @@
+# docker-compose.yml
+# ------------------
+# Local/dev stack: the app plus its one real dependency, Postgres (see
+# CLAUDE.md Decision 2 - no broker, the `outbox` table on this same
+# Postgres instance is the queue). `db`'s init scripts are the project's
+# own numbered migrations, mounted read-only into
+# /docker-entrypoint-initdb.d - the official postgres image runs every
+# *.sql file there, in filename order, on first startup against an empty
+# data volume. That order (001_initial_schema, 002_seed_example,
+# 003_standardize_ticket_status, 004_unify_auth_mechanism) is exactly the
+# sequence README.md section 3.2 has you run by hand, so `docker compose
+# up` reproduces it automatically - seed data (002) included, since this
+# is a local/dev stack. To start empty, remove migrations/002_seed_example.sql
+# from the mount (or delete the db_data volume and re-mount without it)
+# before first startup.
+#
+# This does not replace README.md sections 4-6 (Cloud Run / GCP deployment,
+# Secret Manager) - it's the equivalent of README.md section 3 (local dev)
+# in one command.
+#
+# `db` publishes no host port on purpose - it's reachable only from `app`
+# over the `ticket-bridge` network, by service name (`db:5432`). This
+# matters on a server that already runs other Postgres containers/instances
+# on 5432: there's no host port to collide with, and nothing outside this
+# compose project's own network can reach this database directly.
+
+networks:
+  ticket-bridge:
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ticketbridge
+      POSTGRES_USER: ticketbridge
+      POSTGRES_PASSWORD: ticketbridge
+    networks:
+      - ticket-bridge
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketbridge -d ticketbridge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    # Published by .github/workflows/docker-publish.yml on every push to
+    # main (tag: latest) and on version tags (tag: X.Y.Z) - see README.md
+    # section 7. Pin to a specific X.Y.Z tag instead of `latest` for
+    # anything beyond local/dev use.
+    image: ghcr.io/alexsantos/ticket-bridge:latest
+    ports:
+      - "8080:8080"
+    networks:
+      - ticket-bridge
+    environment:
+      DATABASE_URL: postgresql://ticketbridge:ticketbridge@db:5432/ticketbridge
+      DB_POOL_MIN_SIZE: 1
+      DB_POOL_MAX_SIZE: 5
+      SYNC_BATCH_SIZE: 20
+      SYNC_SCHEDULER_ENABLED: "true"
+      SYNC_INTERVAL_SECONDS: 120
+      OUTBOUND_TIMEOUT_SECONDS: 10
+      SCHEDULER_SHARED_SECRET: a-long-random-key-for-local-use-only
+      LOG_LEVEL: INFO
+      ENVIRONMENT: local
+      # Matches migrations/002_seed_example.sql's seeded secret_ref values
+      # (see .env.example and app/services/secrets.py) - replace for
+      # anything beyond local/dev use.
+      SYSTEM_A_OUTBOUND_KEY: dev-secret-a
+      SYSTEM_B_OUTBOUND_TOKEN: dev-secret-b
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:

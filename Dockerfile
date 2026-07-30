@@ -11,7 +11,7 @@
 # pinger needed, unless SYNC_SCHEDULER_ENABLED=false (e.g. on Cloud Run,
 # see README.md section 4.6).
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
