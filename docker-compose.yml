@@ -24,12 +24,15 @@
 # on 5432: there's no host port to collide with, and nothing outside this
 # compose project's own network can reach this database directly.
 #
-# ROOT_PATH: set when a reverse proxy (e.g. HAProxy) mounts the app under
-# a path prefix rather than at the domain root - see README.md section
-# 3.6.1. Defaults to /ticket-bridge below; override by exporting
-# ROOT_PATH before `docker compose up` (or in a `.env` file next to this
-# one, which compose loads automatically), or set it to an empty string
-# to serve at the domain root instead.
+# `app` reads its configuration from `.env` (`env_file:` below) - the same
+# file local dev uses (README.md section 3.2 step 5: `cp .env.example
+# .env`), so there's exactly one place to set SCHEDULER_SHARED_SECRET,
+# ROOT_PATH, etc. regardless of how you run this. The one exception is
+# DATABASE_URL, overridden below on purpose: .env's copy points at
+# `localhost`, correct for a Postgres running directly on the host, but
+# meaningless inside this container - `db` is this compose stack's own
+# Postgres, reachable only by its service name on the `ticket-bridge`
+# network.
 
 networks:
   ticket-bridge:
@@ -38,6 +41,8 @@ services:
   db:
     image: postgres:17-alpine
     environment:
+      # Must match the credentials embedded in .env's DATABASE_URL - see
+      # the `app` service's DATABASE_URL override below.
       POSTGRES_DB: ticketbridge
       POSTGRES_USER: ticketbridge
       POSTGRES_PASSWORD: ticketbridge
@@ -62,23 +67,10 @@ services:
       - "8080:8080"
     networks:
       - ticket-bridge
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://ticketbridge:ticketbridge@db:5432/ticketbridge
-      DB_POOL_MIN_SIZE: 1
-      DB_POOL_MAX_SIZE: 5
-      SYNC_BATCH_SIZE: 20
-      SYNC_SCHEDULER_ENABLED: "true"
-      SYNC_INTERVAL_SECONDS: 120
-      OUTBOUND_TIMEOUT_SECONDS: 10
-      SCHEDULER_SHARED_SECRET: a-long-random-key-for-local-use-only
-      LOG_LEVEL: INFO
-      ENVIRONMENT: local
-      ROOT_PATH: ${ROOT_PATH:-/ticket-bridge}
-      # Matches migrations/002_seed_example.sql's seeded secret_ref values
-      # (see .env.example and app/services/secrets.py) - replace for
-      # anything beyond local/dev use.
-      SYSTEM_A_OUTBOUND_KEY: dev-secret-a
-      SYSTEM_B_OUTBOUND_TOKEN: dev-secret-b
     depends_on:
       db:
         condition: service_healthy

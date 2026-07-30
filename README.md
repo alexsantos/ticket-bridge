@@ -379,6 +379,7 @@ the app, using the image `docker-publish.yml` already publishes to GHCR
 (no local build):
 
 ```bash
+cp .env.example .env   # if you don't already have one - same file as section 3.2 step 5
 docker login ghcr.io   # only if the package is private - see section 7
 docker compose pull
 docker compose up -d
@@ -397,13 +398,24 @@ name (`db:5432`). This matters on a host that already runs other Postgres
 instances/containers: there's no host port to collide with, and nothing
 outside this compose project's network can reach this database directly.
 
-The scheduler starts automatically (`SYNC_SCHEDULER_ENABLED=true`), same
-as section 3.4. `docker-compose.yml`'s `SCHEDULER_SHARED_SECRET`,
-`SYSTEM_A_OUTBOUND_KEY`, and `SYSTEM_B_OUTBOUND_TOKEN` are dev-only
+`app` loads its configuration from that same `.env` (`env_file:` in
+`docker-compose.yml`) - `SCHEDULER_SHARED_SECRET`, `ROOT_PATH`,
+`SYSTEM_A_OUTBOUND_KEY`, `SYSTEM_B_OUTBOUND_TOKEN`, everything - so
+there's one file to edit regardless of whether you run this via `uv run
+uvicorn` or `docker compose`, not a separate copy hardcoded in the
+compose file. The one exception is `DATABASE_URL`: `docker-compose.yml`
+overrides it to point at `db` (this stack's own Postgres, reachable only
+by that service name on the `ticket-bridge` network) instead of `.env`'s
+`localhost`, which would resolve to the `app` container itself. The
+`.env.example` defaults (`SCHEDULER_SHARED_SECRET`,
+`SYSTEM_A_OUTBOUND_KEY`, `SYSTEM_B_OUTBOUND_TOKEN`) are dev-only
 placeholders matching `002_seed_example.sql`'s seeded `secret_ref`
-values - edit the file directly (or add a `docker-compose.override.yml`)
-for anything beyond local/dev use, and pin `image:` to a specific
-`X.Y.Z` tag instead of `latest` (section 7.1 cuts those tags).
+values - replace them in `.env` for anything beyond local/dev use, and
+pin `image:` in `docker-compose.yml` to a specific `X.Y.Z` tag instead of
+`latest` (section 7.1 cuts those tags).
+
+The scheduler starts automatically (`SYNC_SCHEDULER_ENABLED=true` in
+`.env.example`), same as section 3.4.
 
 ```bash
 docker compose down       # stop, keep the db volume
@@ -412,32 +424,31 @@ docker compose down -v    # stop and wipe the db volume too
 
 #### 3.6.1. Behind a reverse proxy under a path prefix
 
-`docker-compose.yml`'s `ROOT_PATH` (default `/ticket-bridge`) is for
-running behind a reverse proxy (e.g. HAProxy) that mounts the app under a
-path prefix instead of at the domain root - a `path_beg /ticket-bridge`
-ACL routing to this container's port 8080, with the prefix stripped
-before forwarding (HAProxy: `http-request set-path
+`.env`'s `ROOT_PATH` (default `/` - the domain root, i.e. no prefix) is
+for running behind a reverse proxy (e.g. HAProxy) that mounts the app
+under a path prefix instead, e.g. `/ticket-bridge`: a `path_beg
+/ticket-bridge` ACL routing to this container's port 8080, with the
+prefix stripped before forwarding (HAProxy: `http-request set-path
 %[path,regsub(^/ticket-bridge,)]`), and a redirect adding the trailing
 slash when it's missing so relative asset paths resolve correctly (see
-below).
+below). Set `ROOT_PATH=/ticket-bridge` in `.env` to match.
 
-`ROOT_PATH` is passed to uvicorn's `--root-path` (see `Dockerfile`),
-which fixes ASGI-level path generation - the OpenAPI `servers` entry,
-redirects Starlette itself issues - so `/docs` works correctly under the
-prefix. That alone isn't sufficient, though: `app/frontend/index.html`
-and `app.js` reference their own assets and the API with paths relative
-to the current document (`style.css`, `app.js`, `api/v1/...`, `health` -
-no leading `/`), specifically so they keep working unmodified under
-whatever prefix the proxy strips, without the app needing to know the
-prefix to render its own HTML - only the browser's URL bar needs to end
-in `/ticket-bridge/` (with the trailing slash) for that relative
-resolution to land on the right path.
+`ROOT_PATH` is passed to uvicorn's `--root-path` (see `Dockerfile`, which
+also bakes in `/` as its own default for plain `docker run` - section
+3.5), which fixes ASGI-level path generation - the OpenAPI `servers`
+entry, redirects Starlette itself issues - so `/docs` works correctly
+under the prefix. That alone isn't sufficient, though:
+`app/frontend/index.html` and `app.js` reference their own assets and the
+API with paths relative to the current document (`style.css`, `app.js`,
+`api/v1/...`, `health` - no leading `/`), specifically so they keep
+working unmodified under whatever prefix the proxy strips, without the
+app needing to know the prefix to render its own HTML - only the
+browser's URL bar needs to end in `/ticket-bridge/` (with the trailing
+slash) for that relative resolution to land on the right path.
 
-Override the default with a `.env` file next to `docker-compose.yml`
-(`ROOT_PATH=/other-prefix`) or an exported shell variable before `docker
-compose up`; set it to an empty string to serve at the domain root
-instead (no proxy prefix). The same `ROOT_PATH` env var works with
-`docker run` too (section 3.5).
+`.env` is not consumed by local `uv run uvicorn` (section 3.2) - there's
+no proxy in front of it locally, so `ROOT_PATH` only matters for the
+containerized app (`docker run` - section 3.5 - or `docker compose`).
 
 ---
 
