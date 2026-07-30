@@ -371,6 +371,45 @@ deployment mode.
 > to get env-var-based secrets - or extend `secrets.py` with a real third
 > backend if that naming bothers you enough to fix it.
 
+### 3.6. Running with Docker Compose
+
+`docker-compose.yml` is sections 3.2 and 3.5 combined into one command -
+Postgres with the migrations (and seed data) applied automatically, plus
+the app, using the image `docker-publish.yml` already publishes to GHCR
+(no local build):
+
+```bash
+docker login ghcr.io   # only if the package is private - see section 7
+docker compose pull
+docker compose up -d
+```
+
+`db`'s init scripts are the same numbered migrations from section 3.2,
+mounted read-only into `/docker-entrypoint-initdb.d` - the official
+postgres image runs every `*.sql` file there, in filename order, against
+an empty data volume on first startup, so this reproduces section 3.2
+step 4 exactly (seed data included). Access is the same as section 3.2
+(frontend, Swagger docs, health check on `localhost:8080`).
+
+`db` intentionally publishes no host port - it's reachable only from
+`app`, over the compose file's own `ticket-bridge` network, by service
+name (`db:5432`). This matters on a host that already runs other Postgres
+instances/containers: there's no host port to collide with, and nothing
+outside this compose project's network can reach this database directly.
+
+The scheduler starts automatically (`SYNC_SCHEDULER_ENABLED=true`), same
+as section 3.4. `docker-compose.yml`'s `SCHEDULER_SHARED_SECRET`,
+`SYSTEM_A_OUTBOUND_KEY`, and `SYSTEM_B_OUTBOUND_TOKEN` are dev-only
+placeholders matching `002_seed_example.sql`'s seeded `secret_ref`
+values - edit the file directly (or add a `docker-compose.override.yml`)
+for anything beyond local/dev use, and pin `image:` to a specific
+`X.Y.Z` tag instead of `latest` (section 7.1 cuts those tags).
+
+```bash
+docker compose down       # stop, keep the db volume
+docker compose down -v    # stop and wipe the db volume too
+```
+
 ---
 
 ## 4. Deploying to GCP (production)
