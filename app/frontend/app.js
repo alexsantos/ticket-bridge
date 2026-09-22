@@ -184,9 +184,19 @@ function openSystemDialog(system) {
         systemForm.name.value = system.name;
         systemForm.base_url.value = system.base_url;
         systemForm.active.checked = system.active;
-        // auth_config (header/value_prefix/secret_ref) is intentionally never
-        // returned by the API (may reference secrets), so these fields always
-        // start blank when editing - re-enter them to change auth config.
+        systemForm.auth_header.value = system.auth_header ?? "";
+        systemForm.auth_value_prefix.value = system.auth_value_prefix ?? "";
+        // The secret_ref value itself is never returned by the API (see
+        // SystemOut), so this field always starts blank - only has_secret
+        // (whether one is configured at all) is known. Leaving it blank on
+        // Save keeps whatever secret_ref is already stored; type a new one
+        // to replace it (there is currently no way to clear it back to
+        // "no secret" from this dialog - use the API directly for that).
+        systemForm.secret_ref.placeholder = system.has_secret
+            ? "•••••••• (a secret is configured - leave blank to keep it)"
+            : "e.g. system_c_outbound_key";
+    } else {
+        systemForm.secret_ref.placeholder = "e.g. system_c_outbound_key";
     }
     renderSystemTopicsCheckboxes(system ? system.topics : []);
 
@@ -213,19 +223,27 @@ systemForm.addEventListener("submit", async () => {
         document.querySelectorAll("#system-topics-checkboxes input[type=checkbox]:checked")
     ).map((el) => el.value);
 
-    const authConfig = { secret_ref: data.get("secret_ref") || null };
+    // Only include auth_config keys the admin actually typed a value for.
+    // The backend merges (not replaces) auth_config on update, so omitting
+    // a key here leaves whatever is already stored untouched - critical for
+    // secret_ref, whose current value this form never sees (see SystemOut).
+    const authConfig = {};
     const authHeader = data.get("auth_header");
     if (authHeader) authConfig.header = authHeader;
     const authValuePrefix = data.get("auth_value_prefix");
     if (authValuePrefix) authConfig.value_prefix = authValuePrefix;
+    const secretRef = data.get("secret_ref");
+    if (secretRef) authConfig.secret_ref = secretRef;
 
     const body = {
         name: data.get("name"),
         base_url: data.get("base_url"),
-        auth_config: authConfig,
         active: systemForm.active.checked,
         topics: topics,
     };
+    if (Object.keys(authConfig).length > 0) {
+        body.auth_config = authConfig;
+    }
 
     if (codeBeingEdited) {
         await fetch(`${API_BASE}/systems/${codeBeingEdited}`, {

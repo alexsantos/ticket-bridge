@@ -27,9 +27,11 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"])
 
 # Shared read shape: every system row is enriched with its subscribed topic
 # codes via a correlated subquery, so list/get/create/update all return the
-# exact same fields without needing a GROUP BY.
+# exact same fields without needing a GROUP BY. auth_config is included here
+# so _row_to_system_out can split it into its non-secret parts - it is never
+# returned as-is (see SystemOut).
 _SELECT_SYSTEM_COLUMNS = """
-    s.code, s.name, s.base_url, s.active,
+    s.code, s.name, s.base_url, s.active, s.auth_config,
     s.created_at, s.updated_at,
     COALESCE(
         (SELECT array_agg(topic_code ORDER BY topic_code)
@@ -39,13 +41,24 @@ _SELECT_SYSTEM_COLUMNS = """
 """
 
 
+def _row_to_system_out(row: dict) -> SystemOut:
+    row = dict(row)
+    auth_config = row.pop("auth_config", None) or {}
+    return SystemOut(
+        **row,
+        auth_header=auth_config.get("header"),
+        auth_value_prefix=auth_config.get("value_prefix"),
+        has_secret=bool(auth_config.get("secret_ref")),
+    )
+
+
 @router.get("", response_model=list[SystemOut])
 async def list_systems() -> list[SystemOut]:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(f"SELECT {_SELECT_SYSTEM_COLUMNS} FROM systems s ORDER BY s.code")
             rows = await cur.fetchall()
-    return [SystemOut(**row) for row in rows]
+    return [_row_to_system_out(row) for row in rows]
 
 
 @router.get("/{code}", response_model=SystemOut)
@@ -53,7 +66,7 @@ async def get_system(code: str) -> SystemOut:
     row = await _fetch_one(code)
     if row is None:
         raise HTTPException(status_code=404, detail="System not found.")
-    return SystemOut(**row)
+    return _row_to_system_out(row)
 
 
 @router.post("", response_model=SystemOut, status_code=201)
@@ -94,7 +107,7 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                 event_type="system_config_created",
                 detail={"name": payload.name, "base_url": payload.base_url, "topics": payload.topics},
             )
-    return SystemOut(**row)
+    return _row_to_system_out(row)
 
 
 @router.patch("/{code}", response_model=SystemOut)
@@ -112,7 +125,18 @@ async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
         async with conn.transaction():
             async with conn.cursor() as cur:
                 if column_updates:
-                    set_clause = ", ".join(f"{field} = %({field})s" for field in column_updates)
+                    # auth_config is merged (jsonb ||), not replaced: the frontend only
+                    # ever sends the auth_config keys the admin actually typed a new
+                    # value for (see app.js) - a shallow replace would silently wipe
+                    # out, e.g., an existing secret_ref whenever only the header or
+                    # value_prefix was being changed, since SystemOut never returns
+                    # secret_ref for the frontend to send back unchanged.
+                    set_parts = [
+                        "auth_config = COALESCE(auth_config, '{}'::jsonb) || %(auth_config)s::jsonb"
+                        if field == "auth_config" else f"{field} = %({field})s"
+                        for field in column_updates
+                    ]
+                    set_clause = ", ".join(set_parts)
                     await cur.execute(
                         f"UPDATE systems SET {set_clause} WHERE code = %(code)s RETURNING code",
                         {**column_updates, "code": code},
@@ -152,7 +176,7 @@ async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
                 event_type="system_config_updated",
                 detail={"changed_fields": changed_fields},
             )
-    return SystemOut(**row)
+    return _row_to_system_out(row)
 
 
 @router.get("/{code}/api-keys", response_model=list[ApiKeyOut])

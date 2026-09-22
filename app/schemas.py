@@ -148,8 +148,20 @@ class SystemOut(BaseModel):
     topics: list[str]
     created_at: datetime
     updated_at: datetime
-    # auth_config intentionally omitted from the default output - it may
-    # contain references to secrets. See dedicated endpoint if needed.
+    auth_header: str | None = Field(
+        default=None, description="Outbound auth header name, non-default only (see auth_config.header)."
+    )
+    auth_value_prefix: str | None = Field(
+        default=None, description="Outbound auth value prefix, if any (see auth_config.value_prefix)."
+    )
+    has_secret: bool = Field(
+        default=False,
+        description="Whether an outbound secret_ref is configured. The reference itself, "
+                    "and the secret it resolves to, are never returned by this API.",
+    )
+    # auth_config.secret_ref intentionally never returned by the API - unlike
+    # header/value_prefix it names where a secret lives, and the frontend has
+    # no legitimate need to display it back.
 
 
 # ---------------------------------------------------------------------------
