@@ -1,6 +1,6 @@
 [project]
 name = "ticket-bridge"
-version = "0.5.0"
+version = "0.5.1"
 description = "Ticket correlation service across multiple support applications."
 license = "MIT"
 requires-python = ">=3.14"
