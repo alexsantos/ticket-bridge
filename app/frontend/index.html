@@ -9,6 +9,11 @@
 
     Four tabs:
       - Systems: list/create/edit federated systems and their topic subscriptions.
+        Editing an existing system also exposes its inbound API keys (the
+        credential it sends back as X-API-Key on POST /api/v1/events):
+        generate/revoke, with a Kibana-style one-time reveal dialog for a
+        newly generated key's plaintext value (see #dialog-api-key-reveal
+        in app.js) - it is never shown or retrievable again afterward.
       - Topics: list/create/edit ticket categories/queues (e.g. INFRA, SPM, SALES).
       - Conversations: browse conversations and each participant's status.
       - Audit: browse the event log (audit_log).
@@ -89,6 +94,45 @@
                         <button type="submit" class="btn-primary">Save</button>
                     </div>
                 </form>
+
+                <!-- Only shown when editing an existing system - a new
+                     system has no code to attach keys to until saved. -->
+                <div id="system-api-keys-section" class="dialog-section" hidden>
+                    <h4>Inbound API keys</h4>
+                    <p class="hint">
+                        Sent as <code>X-API-Key</code> on <code>POST /api/v1/events</code>.
+                        A key's value is shown only once, right after it's generated -
+                        only its hash is stored, so it can never be retrieved again.
+                    </p>
+                    <table id="table-api-keys">
+                        <thead>
+                            <tr><th>Description</th><th>Status</th><th>Created</th><th></th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <form id="form-api-key-generate" class="inline-form">
+                        <input type="text" id="new-api-key-description" placeholder="Description (e.g. Production key)">
+                        <button type="submit" class="btn-primary">+ Generate key</button>
+                    </form>
+                </div>
+            </dialog>
+
+            <dialog id="dialog-api-key-reveal">
+                <div class="api-key-reveal">
+                    <h3>API key generated</h3>
+                    <p class="hint warning">
+                        Copy this key now and send it to the system's team - it will not
+                        be shown again.
+                    </p>
+                    <div class="api-key-value-row">
+                        <input type="text" id="api-key-reveal-value" readonly>
+                        <button type="button" id="btn-copy-api-key">Copy</button>
+                    </div>
+                    <p id="api-key-copy-feedback" class="hint" aria-live="polite"></p>
+                    <div class="dialog-actions">
+                        <button type="button" id="btn-close-api-key-reveal" class="btn-primary">Done</button>
+                    </div>
+                </div>
             </dialog>
         </section>
 

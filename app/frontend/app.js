@@ -189,6 +189,20 @@ function openSystemDialog(system) {
         // start blank when editing - re-enter them to change auth config.
     }
     renderSystemTopicsCheckboxes(system ? system.topics : []);
+
+    // Inbound API keys are scoped to an existing system_code - nothing to
+    // attach them to until the system itself has been saved once.
+    currentApiKeysSystemCode = system ? system.code : null;
+    const apiKeysSection = document.getElementById("system-api-keys-section");
+    document.getElementById("new-api-key-description").value = "";
+    if (system) {
+        apiKeysSection.hidden = false;
+        loadApiKeys(system.code);
+    } else {
+        apiKeysSection.hidden = true;
+        document.querySelector("#table-api-keys tbody").innerHTML = "";
+    }
+
     systemDialog.showModal();
 }
 
@@ -228,6 +242,93 @@ systemForm.addEventListener("submit", async () => {
         });
     }
     await loadSystems();
+});
+
+// ---------------------------------------------------------------------------
+// Inbound API keys (per-system, nested in the system edit dialog)
+// ---------------------------------------------------------------------------
+let currentApiKeysSystemCode = null;
+
+async function loadApiKeys(systemCode) {
+    const resp = await fetch(`${API_BASE}/systems/${systemCode}/api-keys`);
+    const keys = await resp.json();
+
+    const tbody = document.querySelector("#table-api-keys tbody");
+    tbody.innerHTML = "";
+
+    if (keys.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="hint">No API keys yet.</td></tr>`;
+        return;
+    }
+
+    for (const k of keys) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${k.description ?? "—"}</td>
+            <td><span class="badge ${k.active ? "active" : "inactive"}">${k.active ? "Active" : "Revoked"}</span></td>
+            <td>${formatDate(k.created_at)}</td>
+            <td>${k.active ? `<button type="button" class="btn-revoke">Revoke</button>` : "—"}</td>
+        `;
+        if (k.active) {
+            tr.querySelector(".btn-revoke").addEventListener("click", async () => {
+                if (!confirm("Revoke this API key? The system using it will immediately lose access.")) return;
+                await fetch(`${API_BASE}/systems/${systemCode}/api-keys/${k.id}`, { method: "DELETE" });
+                await loadApiKeys(systemCode);
+            });
+        }
+        tbody.appendChild(tr);
+    }
+}
+
+document.getElementById("form-api-key-generate").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentApiKeysSystemCode) return;
+
+    const input = document.getElementById("new-api-key-description");
+    const resp = await fetch(`${API_BASE}/systems/${currentApiKeysSystemCode}/api-keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: input.value.trim() || null }),
+    });
+    if (!resp.ok) {
+        alert("Could not generate the API key.");
+        return;
+    }
+    const created = await resp.json();
+    input.value = "";
+    await loadApiKeys(currentApiKeysSystemCode);
+    openApiKeyReveal(created.api_key);
+});
+
+// One-time reveal dialog, Kibana/Elasticsearch-style: the plaintext key is
+// only ever available in this response - shown once, then discarded. The
+// field is cleared on close so it doesn't linger in the DOM afterward.
+const apiKeyRevealDialog = document.getElementById("dialog-api-key-reveal");
+
+function openApiKeyReveal(plaintextKey) {
+    const field = document.getElementById("api-key-reveal-value");
+    field.value = plaintextKey;
+    document.getElementById("api-key-copy-feedback").textContent = "";
+    apiKeyRevealDialog.showModal();
+    field.focus();
+    field.select();
+}
+
+document.getElementById("btn-copy-api-key").addEventListener("click", async () => {
+    const field = document.getElementById("api-key-reveal-value");
+    field.select();
+    const feedback = document.getElementById("api-key-copy-feedback");
+    try {
+        await navigator.clipboard.writeText(field.value);
+        feedback.textContent = "Copied to clipboard.";
+    } catch {
+        feedback.textContent = "Could not copy automatically - copy the value manually.";
+    }
+});
+
+document.getElementById("btn-close-api-key-reveal").addEventListener("click", () => {
+    document.getElementById("api-key-reveal-value").value = "";
+    apiKeyRevealDialog.close();
 });
 
 // ---------------------------------------------------------------------------

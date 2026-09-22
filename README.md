@@ -198,7 +198,8 @@ ticket-bridge/
 │   ├── api/
 │   │   ├── events.py            # POST /api/v1/events   (inbound)
 │   │   ├── sync.py              # POST /api/v1/sync     (manual/on-demand outbox trigger)
-│   │   ├── systems.py           # CRUD /api/v1/systems  (configuration + topic subscriptions)
+│   │   ├── systems.py           # CRUD /api/v1/systems  (configuration + topic subscriptions +
+│   │   │                        #   inbound API key lifecycle: .../api-keys)
 │   │   ├── topics.py            # CRUD /api/v1/topics   (ticket categories, e.g. INFRA/SPM/SALES)
 │   │   ├── conversations.py     # GET  /api/v1/conversations
 │   │   └── audit.py             # GET  /api/v1/audit
@@ -213,7 +214,8 @@ ticket-bridge/
 │   └── frontend/
 │       ├── index.html           # configuration/audit panel
 │       ├── style.css
-│       └── app.js
+│       ├── app.js
+│       └── favicon.svg
 ├── migrations/
 │   ├── 001_initial_schema.sql              # full schema, incl. topics/subscriptions (run first)
 │   ├── 002_seed_example.sql                # sample systems, topics, subscriptions (development only)
@@ -667,6 +669,28 @@ gcloud scheduler jobs create http ticket-bridge-sync \
 After deployment, access the frontend at `${SERVICE_URL}/` (authenticated
 via IAM — see the next section) and create the real systems in the
 "Systems" tab.
+
+Each system also needs an **inbound** API key — the credential *it* sends
+back to the bridge as `X-API-Key` on `POST /api/v1/events` (not to be
+confused with the outbound `secret_ref` below, which is the bridge's own
+credential for calling *out* to that system). Generate one either from the
+"Systems" tab (open an already-saved system — a new, unsaved one has no
+`code` to attach a key to yet — and use the "Inbound API keys" section) or
+directly via the API:
+
+```
+POST /api/v1/systems/{code}/api-keys
+{"description": "System C - production key"}
+```
+
+The response's `api_key` field — and the frontend's reveal dialog after
+generating one — is shown **once**: only its SHA-256 hash is stored
+(`api_keys` table), so it cannot be retrieved again afterward, in either
+place. Hand it to that system's team out-of-band. `GET
+/api/v1/systems/{code}/api-keys` lists existing keys (metadata only, no
+plaintext or hash); `DELETE /api/v1/systems/{code}/api-keys/{key_id}` (or
+the "Revoke" button next to a key in the frontend) revokes one
+immediately.
 
 Outbound authentication is one generic mechanism (CLAUDE.md Decision 9),
 not a choice of types: if a system's `auth_config` has a `secret_ref`,

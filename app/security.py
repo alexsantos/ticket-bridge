@@ -21,6 +21,7 @@ We never store API keys in plaintext - only the SHA-256 hash.
 """
 import hashlib
 import hmac
+import secrets
 
 from fastapi import Header, HTTPException, status
 
@@ -31,6 +32,17 @@ from app.database import get_connection
 def hash_key(raw_key: str) -> str:
     """Computes the SHA-256 hash of a plaintext key."""
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def generate_api_key() -> tuple[str, str]:
+    """
+    Generates a new inbound API key: (plaintext, sha256_hash). Only the
+    hash is meant to be persisted (api_keys.key_hash) - the plaintext is
+    returned to the caller once, at creation time, and is never stored or
+    retrievable again.
+    """
+    raw_key = secrets.token_urlsafe(32)
+    return raw_key, hash_key(raw_key)
 
 
 async def authenticate_system(x_api_key: str = Header(..., alias="X-API-Key")) -> str:

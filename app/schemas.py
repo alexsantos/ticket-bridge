@@ -153,6 +153,33 @@ class SystemOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Inbound API keys (CRUD /api/v1/systems/{code}/api-keys) - what an
+# external system sends as X-API-Key on POST /api/v1/events. See
+# app/security.py and CLAUDE.md.
+# ---------------------------------------------------------------------------
+class ApiKeyCreate(BaseModel):
+    description: str | None = None
+
+
+class ApiKeyCreated(BaseModel):
+    id: int
+    description: str | None
+    created_at: datetime
+    api_key: str = Field(
+        description="The plaintext key. Shown once, at creation time only - "
+                    "only its hash is stored, so it cannot be retrieved again."
+    )
+
+
+class ApiKeyOut(BaseModel):
+    id: int
+    description: str | None
+    active: bool
+    created_at: datetime
+    revoked_at: datetime | None
+
+
+# ---------------------------------------------------------------------------
 # Topic configuration (CRUD /api/v1/topics)
 # ---------------------------------------------------------------------------
 class TopicCreate(BaseModel):

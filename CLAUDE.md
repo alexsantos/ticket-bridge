@@ -303,6 +303,58 @@ token, then use it) or HMAC request signing would need real new code in
 `dispatcher.py`, not a config change - no worse off than before this
 decision, since none of the three original options covered those either.
 
+## Decision 10 — Inbound API key lifecycle: an endpoint + a one-time reveal, not manual SQL
+
+**Problem closed**: `api_keys` (the table backing `X-API-Key` on `POST
+/api/v1/events`, see `app/security.py`) has always stored `active` and
+`revoked_at` alongside `key_hash`, but until now nothing in the API or
+frontend actually used them — a new inbound key could only be issued by
+generating one by hand and inserting its hash directly via SQL (still
+documented as the fallback in `migrations/002_seed_example.sql`'s
+comment). That's a reasonable stopgap for a skeleton's seed data, not a
+sustainable way to onboard a real system or to revoke a leaked key
+without shell/DB access.
+
+**Decision made**: `POST /api/v1/systems/{code}/api-keys` generates a key
+server-side (`secrets.token_urlsafe(32)`, via
+`app/security.py:generate_api_key`), persists only its SHA-256 hash, and
+returns the plaintext exactly once, in that response. `GET
+.../api-keys` lists a system's keys by metadata only (`description`,
+`active`, `created_at`, `revoked_at` — never plaintext or hash); `DELETE
+.../api-keys/{key_id}` sets `active = FALSE, revoked_at = now()` rather
+than hard-deleting, so a revoked key still shows up in the audit trail
+instead of silently disappearing. All three write to `audit_log`
+(`inbound_api_key_created` / `inbound_api_key_revoked`), the same
+convention `systems.py`'s existing CRUD already follows.
+
+The frontend mirrors this exactly: the "Systems" tab's edit dialog (only
+once a system has been saved and has a `code` to attach keys to) gets an
+"Inbound API keys" section with the same list/generate/revoke, and
+generating a key opens a one-time reveal dialog — plaintext shown once in
+a read-only field with a copy button and an explicit "won't be shown
+again" warning, then the field is cleared on close so the value doesn't
+linger in the DOM. This is the same UX Kibana uses for Elasticsearch API
+keys and Stripe/GitHub use for theirs — not a novel pattern, chosen
+because it's the shape users already expect for a secret that is
+mechanically incapable of being displayed again (only the hash exists
+server-side after creation).
+
+**Why generation is server-side, not typed in by an admin**: unlike
+`systems.auth_config.secret_ref` (Decision 9), which names a secret that
+already exists somewhere else (Secret Manager, `.env`), an inbound key
+has no other source of truth to point at — the bridge itself is the only
+party that needs to mint it. Letting an admin type in an arbitrary string
+would reintroduce exactly the weak/reused/guessable-secret problem
+`secrets.token_urlsafe` exists to avoid.
+
+**Consciously not done**: no endpoint to *list keys across all systems*
+(only per-`code`, matching how `auth_config` and topic subscriptions are
+already scoped in this file) - there is no dedicated top-level "API Keys"
+page, since every key belongs to exactly one system and the existing
+Systems tab is already the natural place an admin would look for it. If
+key volume per system ever grows large enough that this list becomes
+unwieldy, the extension point is `list_api_keys` in `app/api/systems.py`.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Human authentication for the frontend**: the code does not implement
