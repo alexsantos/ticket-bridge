@@ -144,24 +144,24 @@ locally).
 ## 1. Architecture overview
 
 ```
-System A ──POST /api/v1/events──▶ ┌──────────────────────┐
-                                    │   Ticket Bridge       │
-System B ──POST /api/v1/events──▶ │  (FastAPI, any host    │
-                                    │   that runs it         │
-System C ──POST /api/v1/events──▶ │   continuously)          │
-                                    │                           │
-            ◀── outbox (HTTP) ──── │  PostgreSQL:               │
-                                    │   - conversations           │
-                                    │   - participants              │
-                                    │   - topics + subscriptions      │
-                                    │   - outbox (queue)                │
-                                    │   - audit_log                       │
-                                    └──────────┬───────────┘
-                                               │
-                                     in-process scheduler
-                                     (app/scheduler.py, triggers
-                                      sync every 1-2 min by default -
-                                      see section 3.4)
+System A ──POST /api/v1/events──▶ ┌───────────────────────────┐
+                                  │ Ticket Bridge             │
+System B ──POST /api/v1/events──▶ │ (FastAPI, any host        │
+                                  │  that runs it             │
+System C ──POST /api/v1/events──▶ │  continuously)            │
+                                  │                           │
+              ◀── outbox (HTTP) ──│ PostgreSQL:               │
+                                  │  - conversations          │
+                                  │  - participants           │
+                                  │  - topics + subscriptions │
+                                  │  - outbox (queue)         │
+                                  │  - audit_log              │
+                                  └─────────────┬─────────────┘
+                                                │
+                                              in-process scheduler
+                                              (app/scheduler.py, triggers
+                                               sync every 1-2 min by default -
+                                               see section 3.4)
 ```
 
 - **No external broker** (RabbitMQ/Pub-Sub): the queue is a Postgres table
