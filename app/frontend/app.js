@@ -6,13 +6,29 @@
  * Conversations, Audit.
  *
  * Note: these endpoints (/api/v1/systems, /api/v1/topics,
- * /api/v1/conversations, /api/v1/audit) are assumed to be protected by
- * Cloud Run IAM or by an authentication proxy in front of the service -
- * this file does not implement login. See README.md, "Configuration
- * frontend security" section.
+ * /api/v1/conversations, /api/v1/audit) require an authenticated admin
+ * session (an httpOnly cookie - see app/api/auth.py). Any 401 from the
+ * API - on load (start() calls GET api/v1/auth/me) or mid-session, once
+ * the session expires or is revoked - redirects to login.html, via the
+ * fetch() wrapper below. See README.md, "Configuration frontend security"
+ * section.
  */
 
 const API_BASE = "api/v1";
+
+// Wraps window.fetch so every existing call site gets the session-expiry
+// redirect for free, instead of each one checking for 401 itself. On a
+// 401 the returned promise never settles: the page is navigating away,
+// and this stops callers from trying to render the error body meanwhile.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+    const resp = await nativeFetch(...args);
+    if (resp.status === 401) {
+        window.location.href = "login.html";
+        return new Promise(() => {});
+    }
+    return resp;
+};
 
 let allTopics = [];
 
@@ -451,10 +467,61 @@ function formatDate(iso) {
 }
 
 // ---------------------------------------------------------------------------
+// Authentication (login redirect, logout, change password)
+// ---------------------------------------------------------------------------
+document.getElementById("btn-logout").addEventListener("click", async () => {
+    await fetch(`${API_BASE}/auth/logout`, { method: "POST" });
+    window.location.href = "login.html";
+});
+
+const changePasswordDialog = document.getElementById("dialog-change-password");
+const changePasswordForm = document.getElementById("form-change-password");
+
+document.getElementById("btn-change-password").addEventListener("click", () => {
+    changePasswordForm.reset();
+    document.getElementById("change-password-error").hidden = true;
+    changePasswordDialog.showModal();
+});
+document.getElementById("btn-cancel-change-password").addEventListener("click", () => changePasswordDialog.close());
+
+changePasswordForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const data = new FormData(changePasswordForm);
+    const errorEl = document.getElementById("change-password-error");
+    errorEl.hidden = true;
+
+    if (data.get("new_password") !== data.get("new_password_confirm")) {
+        errorEl.textContent = "New passwords do not match.";
+        errorEl.hidden = false;
+        return;
+    }
+
+    const resp = await fetch(`${API_BASE}/auth/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            current_password: data.get("current_password"),
+            new_password: data.get("new_password"),
+        }),
+    });
+    if (!resp.ok) {
+        errorEl.textContent = "Current password is incorrect, or the new password is too short.";
+        errorEl.hidden = false;
+        return;
+    }
+    changePasswordDialog.close();
+    alert("Password changed.");
+});
+
+// ---------------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------------
 (async function start() {
     const statusEl = document.getElementById("connection-status");
+
+    const me = await fetch(`${API_BASE}/auth/me`).then((r) => r.json()); // 401 -> redirect, see fetch wrapper
+    document.getElementById("current-username").textContent = me.username;
+
     try {
         await fetch("health").then((r) => r.json());
         statusEl.textContent = "Connected to the service.";

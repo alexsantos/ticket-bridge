@@ -24,7 +24,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import audit, conversations, events, sync, systems, topics
+from app.api import audit, auth, conversations, events, sync, systems, topics
 from app.config import get_settings
 from app.database import close_pool, init_pool
 from app.scheduler import start_scheduler, stop_scheduler
@@ -54,6 +54,7 @@ app = FastAPI(
 
 app.include_router(events.router)
 app.include_router(sync.router)
+app.include_router(auth.router)
 app.include_router(systems.router)
 app.include_router(topics.router)
 app.include_router(conversations.router)

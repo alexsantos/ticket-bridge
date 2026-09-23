@@ -242,9 +242,46 @@ footer {
     color: #9aa1ab;
 }
 
+.btn-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-primary);
+    text-decoration: underline;
+    font-size: inherit;
+    cursor: pointer;
+}
+
 code {
     background: #eef1f5;
     padding: 0.1rem 0.35rem;
     border-radius: 3px;
     font-size: 0.82rem;
 }
+
+/* login.html */
+.login-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.login-card {
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 2rem;
+    width: 360px;
+    max-width: 90vw;
+}
+
+.login-card h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    color: var(--color-primary);
+}
+
+/* .login-card already carries the 2rem inset - the generic `form` rule's
+   own padding would otherwise double up on top of it. */
+.login-card form { padding: 1rem 0 0; }

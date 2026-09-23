@@ -61,6 +61,20 @@ class Settings(BaseSettings):
     # in-process and needs no authentication.
     scheduler_shared_secret: str = "change-me-in-production"
 
+    # Admin frontend session cookie (see app/api/auth.py, app/security.py's
+    # require_login). Distinct from SCHEDULER_SHARED_SECRET / api_keys -
+    # this authenticates human admins of the Systems/Topics/Conversations/
+    # Audit UI, not machine callers.
+    session_cookie_name: str = "ticket_bridge_session"
+    session_lifetime_hours: int = 12
+
+    # Login brute-force throttling (app/api/auth.py): after this many failed
+    # attempts for one username within the window, further attempts for it
+    # get a 429 until the window slides past them. A successful login
+    # resets the count.
+    login_max_failed_attempts: int = 5
+    login_lockout_minutes: int = 15
+
     # Log level.
     log_level: str = "INFO"
 

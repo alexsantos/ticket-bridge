@@ -9,16 +9,17 @@ app/api/events.py), and systems declare their subscriptions to topics via
 only manages the topics themselves - structurally a clone of
 app/api/systems.py's CRUD pattern.
 
-Security note: same as systems.py - no authentication of its own, assumed
-to sit behind Cloud Run IAM or an authentication proxy (see README.md).
+Security note: same as systems.py - every route here requires an
+authenticated admin session (see require_login in app/security.py).
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
 from app.schemas import TopicCreate, TopicOut, TopicUpdate
+from app.security import require_login
 from app.services.audit_service import record_audit
 
-router = APIRouter(prefix="/api/v1/topics", tags=["topics"])
+router = APIRouter(prefix="/api/v1/topics", tags=["topics"], dependencies=[Depends(require_login)])
 
 
 @router.get("", response_model=list[TopicOut])

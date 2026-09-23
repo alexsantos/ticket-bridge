@@ -194,10 +194,11 @@ ticket-bridge/
 │   ├── scheduler.py              # in-process periodic outbox-sync trigger (APScheduler)
 │   ├── models.py                # internal domain models
 │   ├── schemas.py                # API request/response contracts
-│   ├── security.py              # authentication (API keys, sync trigger secret)
+│   ├── security.py              # authentication (API keys, sync trigger secret, admin sessions)
 │   ├── api/
 │   │   ├── events.py            # POST /api/v1/events   (inbound)
 │   │   ├── sync.py              # POST /api/v1/sync     (manual/on-demand outbox trigger)
+│   │   ├── auth.py              # POST /api/v1/auth/login, /logout, /change-password, GET /me
 │   │   ├── systems.py           # CRUD /api/v1/systems  (configuration + topic subscriptions +
 │   │   │                        #   inbound API key lifecycle: .../api-keys)
 │   │   ├── topics.py            # CRUD /api/v1/topics   (ticket categories, e.g. INFRA/SPM/SALES)
@@ -212,15 +213,18 @@ ticket-bridge/
 │   │   ├── secrets.py              # secret resolution (Secret Manager / env)
 │   │   └── audit_service.py        # audit_log read/write
 │   └── frontend/
-│       ├── index.html           # configuration/audit panel
+│       ├── index.html           # configuration/audit panel (requires an admin session)
+│       ├── login.html           # admin sign-in page
 │       ├── style.css
 │       ├── app.js
+│       ├── login.js
 │       └── favicon.svg
 ├── migrations/
 │   ├── 001_initial_schema.sql              # full schema, incl. topics/subscriptions (run first)
 │   ├── 002_seed_example.sql                # sample systems, topics, subscriptions (development only)
 │   ├── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
-│   └── 004_unify_auth_mechanism.sql        # drops auth_type - one generic header-based auth mechanism
+│   ├── 004_unify_auth_mechanism.sql        # drops auth_type - one generic header-based auth mechanism
+│   └── 005_admin_authentication.sql        # users/sessions tables + seeded default admin
 ├── tests/
 │   └── test_payload_builder.py
 ├── examples/
@@ -270,6 +274,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/001_initial_schema.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/002_seed_example.sql   # optional, sample data
 psql "postgresql://localhost/ticketbridge" -f migrations/003_standardize_ticket_status.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/004_unify_auth_mechanism.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/005_admin_authentication.sql  # seeds the default admin - see section 5
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -280,7 +285,8 @@ uv run uvicorn app.main:app --reload --port 8080
 ```
 
 Access:
-- **Frontend**: http://localhost:8080/
+- **Frontend**: http://localhost:8080/ (redirects to a login page - see
+  section 5 for the seeded admin credentials)
 - **Interactive API documentation (Swagger)**: http://localhost:8080/docs
 - **Health check**: http://localhost:8080/health
 
@@ -315,6 +321,40 @@ To run the automated tests:
 ```bash
 uv run pytest tests/ -v
 ```
+
+**Verifying auth locally** — the login/session round trip needs a live
+database, so it isn't covered by the pytest suite above (see
+`tests/test_auth_security.py`'s docstring); check it manually instead:
+```bash
+# 1. Rejected before login
+curl -i http://localhost:8080/api/v1/systems   # expect 401
+
+# 2. Log in as the seeded admin (see section 5), keeping the session cookie
+curl -i -c /tmp/cookies.txt -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "ChangeMe-Immediately!"}'
+
+# 3. Same call now succeeds with the cookie
+curl -i -b /tmp/cookies.txt http://localhost:8080/api/v1/systems   # expect 200
+
+# 4. Log out and confirm access is revoked again
+curl -i -b /tmp/cookies.txt -c /tmp/cookies.txt -X POST http://localhost:8080/api/v1/auth/logout
+curl -i -b /tmp/cookies.txt http://localhost:8080/api/v1/systems   # expect 401
+
+# 5. Throttling: 5 wrong passwords, then even the right one is refused
+for i in 1 2 3 4 5; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/api/v1/auth/login \
+    -H "Content-Type: application/json" -d '{"username": "admin", "password": "wrong"}'
+done                                                                # expect 401 x5
+curl -i -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "ChangeMe-Immediately!"}'   # expect 429
+# (wait LOGIN_LOCKOUT_MINUTES, or clear it:
+#  DELETE FROM audit_log WHERE event_type = 'admin_login_failed' AND detail->>'username' = 'admin';)
+```
+Or just open http://localhost:8080/ in a browser — it should redirect to
+`login.html`; after signing in, the "Change password" and "Log out" links
+are in the footer.
 
 ### 3.4. Automatic background sync
 
@@ -556,7 +596,12 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/003_standardize_ticket_status.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/004_unify_auth_mechanism.sql
-# (002_seed_example.sql is for development only - do not run in production)
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/005_admin_authentication.sql
+# (002_seed_example.sql is for development only - do not run in production.
+#  005_admin_authentication.sql, unlike 002, must run here too - it's the
+#  only way an admin account exists at all. Change its seeded password
+#  immediately after first login - see section 5.)
 ```
 
 ### 4.3. Secrets (Secret Manager)
@@ -716,24 +761,55 @@ option, would need new code in `dispatcher.py`).
 
 ## 5. Configuration frontend security
 
-The configuration (`/api/v1/systems`) and audit (`/api/v1/conversations`,
-`/api/v1/audit`) endpoints **have no authentication of their own** in the
-code — Cloud Run is deployed with `--no-allow-unauthenticated`, so only
-principals with the `roles/run.invoker` role can call the service.
+The configuration (`/api/v1/systems`, `/api/v1/topics`) and audit
+(`/api/v1/conversations`, `/api/v1/audit`) endpoints, and the static
+frontend's own data, require an **authenticated admin session** —
+implemented in-app (`app/api/auth.py`, `require_login` in
+`app/security.py`), not delegated to an external proxy. See CLAUDE.md
+Decision 11 for why this changed from the original design (which assumed
+Cloud Run IAP sat in front of the service — no longer the case now that
+this deploys to a self-hosted VM/container behind plain nginx).
 
-For human access to the frontend, the simplest options are:
-- **Identity-Aware Proxy (IAP)** in front of Cloud Run — recommended, gives
-  login with a corporate Google account with no extra code.
-- An authenticated tunnel via `gcloud run services proxy ticket-bridge` for
-  occasional administrative access without publicly exposing the service.
+**How it works**: `POST /api/v1/auth/login` (username + password) sets an
+httpOnly session cookie on success; the session is tracked server-side in
+the `sessions` table (SHA-256 hash of the token only, same pattern as
+inbound API keys — see `migrations/005_admin_authentication.sql`) and
+expires after `SESSION_LIFETIME_HOURS` (default 12). The frontend
+(`app/frontend/app.js`) redirects to `login.html` whenever any API call
+returns 401 — on page load or mid-session, once the session expires or is
+revoked — and the footer has "Change password" and "Log out" links (`POST
+/api/v1/auth/change-password`, `POST /api/v1/auth/logout`). Changing the
+password also revokes every *other* active session of that user; the one
+used to make the change stays signed in.
 
-The `/api/v1/events` (called by external systems) and `/api/v1/sync`
-(called by the Scheduler) endpoints have their own authentication (per-system
-API key / scheduler secret), independent of Cloud Run IAM — so even with
-`--no-allow-unauthenticated` it may be necessary to evaluate case by case
-whether those systems can also authenticate via IAM, or whether they need
-`--allow-unauthenticated` with application-level authentication (API key)
-as the only barrier.
+**Brute-force throttling**: after `LOGIN_MAX_FAILED_ATTEMPTS` (default 5)
+failed logins for one username within `LOGIN_LOCKOUT_MINUTES` (default
+15), further attempts for that username get `429 Too Many Requests` —
+even with the correct password — until the window slides past them. A
+successful login resets the count. Failures are recorded in the audit log
+as `admin_login_failed`, which is also what the throttle counts. It's
+per-username, not per-IP, so someone hammering `admin` can keep the real
+admin locked out for as long as they keep trying; if that happens, block
+the source at nginx.
+
+**Default admin account**: migration `005` seeds one admin user:
+- Username: `admin`
+- Password: `ChangeMe-Immediately!`
+
+**Change this password immediately after your first login** — it's a
+known value in git history (same as this project's other seeded dev
+credentials), via the "Change password" link in the frontend footer or
+`POST /api/v1/auth/change-password`.
+
+`POST /api/v1/events` (called by external systems) and `POST
+/api/v1/sync` (called by the Scheduler) are **not** covered by admin
+sessions — they keep their own separate authentication (per-system API
+key / scheduler secret, see `app/security.py`), since those are
+machine-to-machine callers, not human admins.
+
+An external layer (Cloud Run IAP, an authenticated `gcloud run services
+proxy` tunnel, or your reverse proxy's own auth) is now optional
+defense-in-depth on top of the above, rather than the only mechanism.
 
 ---
 
@@ -811,7 +887,6 @@ to the published image.
 
 ## 8. Suggested next steps (out of scope for this skeleton)
 
-- Human authentication for the frontend (IAP).
 - Alerts (e.g. Telegram, similar to other internal projects) when outbox
   entries reach `status = 'failed'`.
 - Pagination on `GET /api/v1/conversations` for higher production volumes

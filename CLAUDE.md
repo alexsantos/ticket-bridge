@@ -355,12 +355,92 @@ Systems tab is already the natural place an admin would look for it. If
 key volume per system ever grows large enough that this list becomes
 unwieldy, the extension point is `list_api_keys` in `app/api/systems.py`.
 
+## Decision 11 — Admin frontend authentication: bcrypt + DB-backed sessions, not JWT/IAP
+
+**Problem closed**: this project's original design (see the now-removed
+"Human authentication for the frontend" item below) deliberately deferred
+human auth for the Systems/Topics/Conversations/Audit frontend to an
+external layer - specifically Cloud Run IAP, or an authenticated tunnel.
+That assumption held only as long as the deployment target was Cloud Run.
+It has since moved to a self-hosted VM/container behind a plain nginx
+reverse proxy (see the reverse-proxy-path-prefix work earlier in this
+file's history), which provides no such layer - the admin frontend had,
+in practice, zero authentication of its own.
+
+**Decision made**: real in-app authentication, added by
+`migrations/005_admin_authentication.sql` and `app/api/auth.py`:
+
+- **Password hashing: bcrypt**, not a hand-rolled stdlib scheme. Every
+  other credential in this project (`api_keys.key_hash`,
+  `sessions.token_hash`) is a fast SHA-256 hash of a high-entropy
+  server-generated secret, which is correct for those - they're never
+  brute-forceable dictionary targets. A human-chosen password is exactly
+  that kind of target, so it needs a deliberately slow, salted algorithm;
+  bcrypt is the well-audited standard for this, and the one new dependency
+  it costs is a reasonable trade against hand-rolling PBKDF2 iteration
+  counts and constant-time comparisons correctly.
+- **Sessions are DB-backed** (`sessions` table), not a stateless JWT.
+  Chosen specifically so logout/revocation is immediate and inspectable
+  via plain SQL - the same reasoning `api_keys` already uses
+  (`active`/`revoked_at`, never a hard delete). A stateless JWT would need
+  a separate revocation blocklist to get the same property, which is more
+  moving parts for no benefit at this project's scale (Decision 6: no ORM,
+  plain SQL, keep it simple).
+- **Transport is an httpOnly cookie**, not a bearer token the frontend
+  holds in JS/localStorage. This was the deciding factor for not touching
+  every existing `fetch()` call site in `app.js`: the browser attaches the
+  cookie automatically, so `loadSystems`/`loadTopics`/etc. needed zero
+  changes. A single `window.fetch` wrapper at the top of `app.js`
+  redirects to `login.html` on any 401, so an expired/revoked session
+  mid-use is handled the same way as on page load (`start()`'s `GET
+  /api/v1/auth/me`) - consequently no admin endpoint may use 401 for
+  anything but "no valid session" (a wrong *current* password on
+  `change-password` is a 400 for this reason). `SameSite=Lax` plus this being a
+  same-origin, low-traffic internal admin tool is judged sufficient CSRF
+  mitigation without adding a separate CSRF-token mechanism.
+- **Default admin seeded in the migration**, not bootstrapped from env
+  vars at startup. Simpler and always present after running migrations,
+  at the cost of a known-shape default credential (`admin` /
+  `ChangeMe-Immediately!`, see README.md section 5) sitting in git
+  history - the same trade-off `002_seed_example.sql` already makes for
+  its dev API keys, except this one seeds in every environment (there is
+  no other bootstrap path into `users`), so the loud "change this
+  immediately" documentation matters more here than it does for dev-only
+  seed data.
+- **Login brute-force throttling is per-username, counted from
+  `audit_log`**, not a separate table or an in-memory counter. Failed
+  logins are recorded as `admin_login_failed` (worth auditing anyway);
+  `_recent_failed_logins` in `app/api/auth.py` counts them within
+  `LOGIN_LOCKOUT_MINUTES`, ignoring any before the username's last
+  successful login, and at `LOGIN_MAX_FAILED_ATTEMPTS` further attempts
+  get a 429 before bcrypt runs. Being DB-backed, it holds across multiple
+  instances, which an in-process counter wouldn't. Per-username rather
+  than per-IP because the known default username is the real target, and
+  a per-IP limit behind nginx would need trusted `X-Forwarded-For`
+  handling. Accepted cost: anyone can keep a known username locked out by
+  continuing to fail against it - an availability nuisance, not a breach,
+  handled by blocking the source at the proxy.
+- **Changing a password revokes the user's other sessions**, not the one
+  making the change - a leaked or forgotten session must not outlive the
+  password it was opened with.
+
+**Scope, deliberately**: this protects the human admin surface only -
+`systems`/`topics`/`conversations`/`audit` routers, plus a client-side
+redirect for the static frontend. `POST /api/v1/events` (per-system API
+key) and `POST /api/v1/sync` (scheduler shared secret) are untouched -
+those already authenticate distinct, non-human callers correctly; folding
+them into admin sessions would conflate two different trust boundaries.
+
+**Consciously not done**: no password-change *policy* beyond a minimum
+length (8 chars, `ChangePasswordRequest` in `schemas.py`) - no complexity
+rules, no expiry, no MFA. No self-service account creation - `users` rows
+are DB-only for now, same maturity level `api_keys` was at before
+Decision 10 (a natural next extension point if more than one human admin
+is ever needed). No pruning of expired/revoked `sessions` rows - mirrors
+`api_keys`, which also never prunes; fine at this data volume.
+
 ## What this skeleton assumes and leaves undecided
 
-- **Human authentication for the frontend**: the code does not implement
-  login; it assumes IAP or an authentication proxy in front of Cloud Run
-  (see README.md, section 5). Deliberately deferred decision — it depends
-  on how the organization already manages access to internal tools.
 - **Field-conflict reconciliation** (who "wins" when both systems write the
   same field almost simultaneously): not implemented. The skeleton assumes
   each system is authoritative over its own `local_status`, and a

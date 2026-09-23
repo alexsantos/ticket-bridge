@@ -4,15 +4,19 @@ conversations.py
 Read-only query endpoints for conversations and their participants - used
 by the frontend's "Conversations" tab (an operational view of what's
 correlated with what, equivalent to browsing tickets in the old OSTicket).
+
+Security note: every route here requires an authenticated admin session
+(see require_login in app/security.py).
 """
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from app.schemas import ConversationOut, ParticipantOut
+from app.security import require_login
 
-router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"])
+router = APIRouter(prefix="/api/v1/conversations", tags=["conversations"], dependencies=[Depends(require_login)])
 
 
 @router.get("", response_model=list[ConversationOut])

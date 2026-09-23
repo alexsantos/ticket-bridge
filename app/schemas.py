@@ -31,6 +31,25 @@ class CanonicalStatus(StrEnum):
 
 
 # ---------------------------------------------------------------------------
+# Admin authentication (/api/v1/auth) - human login for the
+# Systems/Topics/Conversations/Audit frontend. See app/security.py,
+# app/api/auth.py, CLAUDE.md Decision 11.
+# ---------------------------------------------------------------------------
+class LoginRequest(BaseModel):
+    username: str
+    password: str = Field(max_length=72)  # bcrypt's hard input limit
+
+
+class UserOut(BaseModel):
+    username: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
+
+
+# ---------------------------------------------------------------------------
 # Events received from an external system (POST /api/v1/events)
 # ---------------------------------------------------------------------------
 class IncomingEvent(BaseModel):

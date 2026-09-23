@@ -11,19 +11,18 @@ system (the "third system" from the original design), or changing which
 topics it subscribes to, is a runtime configuration operation, without
 deploying new code.
 
-Security note: these endpoints should sit behind Cloud Run IAM
-authentication or an authentication proxy - they have no authentication of
-their own because access is assumed to be limited to administrators (see
-README.md).
+Security note: every route here requires an authenticated admin session
+(see require_login in app/security.py, app/api/auth.py, CLAUDE.md
+Decision 11) - no longer assumed to sit behind an external proxy.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
 from app.schemas import ApiKeyCreate, ApiKeyCreated, ApiKeyOut, SystemCreate, SystemOut, SystemUpdate
-from app.security import generate_api_key
+from app.security import generate_api_key, require_login
 from app.services.audit_service import record_audit
 
-router = APIRouter(prefix="/api/v1/systems", tags=["systems"])
+router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Depends(require_login)])
 
 # Shared read shape: every system row is enriched with its subscribed topic
 # codes via a correlated subquery, so list/get/create/update all return the

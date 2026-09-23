@@ -7,12 +7,14 @@
 # /docker-entrypoint-initdb.d - the official postgres image runs every
 # *.sql file there, in filename order, on first startup against an empty
 # data volume. That order (001_initial_schema, 002_seed_example,
-# 003_standardize_ticket_status, 004_unify_auth_mechanism) is exactly the
-# sequence README.md section 3.2 has you run by hand, so `docker compose
-# up` reproduces it automatically - seed data (002) included, since this
-# is a local/dev stack. To start empty, remove migrations/002_seed_example.sql
-# from the mount (or delete the db_data volume and re-mount without it)
-# before first startup.
+# 003_standardize_ticket_status, 004_unify_auth_mechanism,
+# 005_admin_authentication) is exactly the sequence README.md section 3.2
+# has you run by hand, so `docker compose up` reproduces it automatically
+# - seed data (002) included, since this is a local/dev stack (005's
+# seeded admin account is NOT dev-only - see README.md section 5 for its
+# default credentials and why they need changing immediately). To start
+# empty, remove migrations/002_seed_example.sql from the mount (or delete
+# the db_data volume and re-mount without it) before first startup.
 #
 # This does not replace README.md sections 4-6 (Cloud Run / GCP deployment,
 # Secret Manager) - it's the equivalent of README.md section 3 (local dev)

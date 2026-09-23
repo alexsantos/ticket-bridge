@@ -3,16 +3,20 @@ audit.py
 --------
 GET /api/v1/audit - queries the audit trail page by page, with optional
 filters by conversation and by system. Feeds the frontend's "Audit" tab.
+
+Security note: every route here requires an authenticated admin session
+(see require_login in app/security.py).
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.database import get_connection
 from app.schemas import AuditLogOut, AuditLogPage
+from app.security import require_login
 from app.services.audit_service import list_recent
 
-router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
+router = APIRouter(prefix="/api/v1/audit", tags=["audit"], dependencies=[Depends(require_login)])
 
 
 @router.get("", response_model=AuditLogPage)

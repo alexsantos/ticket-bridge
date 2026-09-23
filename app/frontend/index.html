@@ -17,6 +17,11 @@
       - Topics: list/create/edit ticket categories/queues (e.g. INFRA, SPM, SALES).
       - Conversations: browse conversations and each participant's status.
       - Audit: browse the event log (audit_log).
+
+    Requires an authenticated admin session - app.js's start() redirects
+    to login.html on a 401 from GET api/v1/auth/me. The footer has
+    "Change password" and "Log out" (see app/api/auth.py, CLAUDE.md
+    Decision 11).
 -->
 <html lang="en">
 <head>
@@ -238,8 +243,31 @@
         </section>
     </main>
 
+    <dialog id="dialog-change-password">
+        <form id="form-change-password">
+            <h3>Change password</h3>
+            <label>Current password
+                <input type="password" name="current_password" required>
+            </label>
+            <label>New password
+                <input type="password" name="new_password" required minlength="8">
+            </label>
+            <label>Confirm new password
+                <input type="password" name="new_password_confirm" required minlength="8">
+            </label>
+            <p id="change-password-error" class="hint warning" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" id="btn-cancel-change-password">Cancel</button>
+                <button type="submit" class="btn-primary">Change password</button>
+            </div>
+        </form>
+    </dialog>
+
     <footer>
         <span id="connection-status"></span>
+        · Signed in as <strong id="current-username"></strong>
+        · <button id="btn-change-password" type="button" class="btn-link">Change password</button>
+        · <button id="btn-logout" type="button" class="btn-link">Log out</button>
     </footer>
 
     <script src="app.js"></script>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!--
+    login.html
+    ----------
+    Admin sign-in page. Static HTML + vanilla JS (login.js), same
+    no-build-step approach as index.html (CLAUDE.md Decision 7).
+
+    app.js redirects here whenever GET api/v1/auth/me returns 401 - see
+    its start() function. On successful login, login.js redirects back to
+    index.html (relative path, so it respects a ROOT_PATH reverse-proxy
+    prefix the same way index.html's own fetch calls do).
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Bridge — Sign in</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-page">
+    <div class="login-card">
+        <h1>Ticket Bridge</h1>
+        <p class="subtitle">Sign in to the configuration &amp; audit console</p>
+        <form id="form-login">
+            <label>Username
+                <input type="text" name="username" required autofocus>
+            </label>
+            <label>Password
+                <input type="password" name="password" required>
+            </label>
+            <p id="login-error" class="hint warning" hidden></p>
+            <div class="dialog-actions">
+                <button type="submit" class="btn-primary">Sign in</button>
+            </div>
+        </form>
+    </div>
+    <script src="login.js"></script>
+</body>
+</html>
