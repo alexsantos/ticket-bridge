@@ -169,10 +169,16 @@ async function loadSystems() {
 
 const systemDialog = document.getElementById("dialog-system");
 const systemForm = document.getElementById("form-system");
+const clearSecretField = document.getElementById("clear-secret-field");
+const clearSecretCheckbox = document.getElementById("clear-secret-checkbox");
 let codeBeingEdited = null;
 
 document.getElementById("btn-new-system").addEventListener("click", () => openSystemDialog(null));
 document.getElementById("btn-cancel-system").addEventListener("click", () => systemDialog.close());
+clearSecretCheckbox.addEventListener("change", () => {
+    systemForm.secret_ref.disabled = clearSecretCheckbox.checked;
+    if (clearSecretCheckbox.checked) systemForm.secret_ref.value = "";
+});
 
 function openSystemDialog(system) {
     systemForm.reset();
@@ -190,14 +196,16 @@ function openSystemDialog(system) {
         // SystemOut), so this field always starts blank - only has_secret
         // (whether one is configured at all) is known. Leaving it blank on
         // Save keeps whatever secret_ref is already stored; type a new one
-        // to replace it (there is currently no way to clear it back to
-        // "no secret" from this dialog - use the API directly for that).
+        // to replace it, or check "Clear stored secret" to remove it.
         systemForm.secret_ref.placeholder = system.has_secret
             ? "•••••••• (a secret is configured - leave blank to keep it)"
             : "e.g. system_c_outbound_key";
     } else {
         systemForm.secret_ref.placeholder = "e.g. system_c_outbound_key";
     }
+    clearSecretCheckbox.checked = false;
+    systemForm.secret_ref.disabled = false;
+    clearSecretField.hidden = !system;
     renderSystemTopicsCheckboxes(system ? system.topics : []);
 
     // Inbound API keys are scoped to an existing system_code - nothing to
@@ -233,7 +241,11 @@ systemForm.addEventListener("submit", async () => {
     const authValuePrefix = data.get("auth_value_prefix");
     if (authValuePrefix) authConfig.value_prefix = authValuePrefix;
     const secretRef = data.get("secret_ref");
-    if (secretRef) authConfig.secret_ref = secretRef;
+    if (codeBeingEdited && clearSecretCheckbox.checked) {
+        authConfig.secret_ref = null; // explicit clear - safe, see sync_service.py's .get()
+    } else if (secretRef) {
+        authConfig.secret_ref = secretRef;
+    }
 
     const body = {
         name: data.get("name"),

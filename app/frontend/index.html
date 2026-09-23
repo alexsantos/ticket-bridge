@@ -77,6 +77,15 @@
                     <label>Secret reference (name in Secret Manager / env var)
                         <input type="text" name="secret_ref" placeholder="e.g. system_c_outbound_key">
                     </label>
+                    <div id="clear-secret-field" hidden>
+                        <label class="checkbox">
+                            <input type="checkbox" id="clear-secret-checkbox"> Clear stored secret
+                        </label>
+                        <p class="hint">
+                            Removes the configured secret reference entirely (back to "no secret").
+                            Disables the field above while checked.
+                        </p>
+                    </div>
                     <p class="hint">
                         Status vocabulary and payload shape are fixed by the bridge for every
                         system - see the "Integration contract" section in README.md. There's
