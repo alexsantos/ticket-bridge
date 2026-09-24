@@ -56,9 +56,9 @@ async function loadTopics() {
     for (const t of allTopics) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td><code>${t.code}</code></td>
-            <td>${t.name}</td>
-            <td>${t.description ?? "—"}</td>
+            <td><code>${escapeHtml(t.code)}</code></td>
+            <td>${escapeHtml(t.name)}</td>
+            <td>${escapeHtml(t.description ?? "—")}</td>
             <td><span class="badge ${t.active ? "active" : "inactive"}">${t.active ? "Active" : "Inactive"}</span></td>
             <td>${formatDate(t.updated_at)}</td>
         `;
@@ -163,10 +163,10 @@ async function loadSystems() {
     for (const s of systems) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td><code>${s.code}</code></td>
-            <td>${s.name}</td>
-            <td>${s.base_url}</td>
-            <td>${(s.topics || []).join(", ") || "—"}</td>
+            <td><code>${escapeHtml(s.code)}</code></td>
+            <td>${escapeHtml(s.name)}</td>
+            <td>${escapeHtml(s.base_url)}</td>
+            <td>${escapeHtml((s.topics || []).join(", ") || "—")}</td>
             <td><span class="badge ${s.active ? "active" : "inactive"}">${s.active ? "Active" : "Inactive"}</span></td>
             <td>${formatDate(s.updated_at)}</td>
         `;
@@ -310,7 +310,7 @@ async function loadApiKeys(systemCode) {
     for (const k of keys) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td>${k.description ?? "—"}</td>
+            <td>${escapeHtml(k.description ?? "—")}</td>
             <td><span class="badge ${k.active ? "active" : "inactive"}">${k.active ? "Active" : "Revoked"}</span></td>
             <td>${formatDate(k.created_at)}</td>
             <td>${k.active ? `<button type="button" class="btn-revoke">Revoke</button>` : "—"}</td>
@@ -394,14 +394,14 @@ async function loadConversations() {
     tbody.innerHTML = "";
     for (const c of conversations) {
         const participants = c.participants
-            .map((p) => `${p.system_code}: <code>${p.external_ref}</code> (${p.local_status ?? "—"})`)
+            .map((p) => `${escapeHtml(p.system_code)}: <code>${escapeHtml(p.external_ref)}</code> (${escapeHtml(p.local_status ?? "—")})`)
             .join("<br>");
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td><code>${c.conversation_id.slice(0, 8)}…</code></td>
-            <td>${c.subject ?? "—"}</td>
-            <td><code>${c.topic_code}</code></td>
-            <td>${c.overall_status}</td>
+            <td><code>${escapeHtml(c.conversation_id.slice(0, 8))}…</code></td>
+            <td>${escapeHtml(c.subject ?? "—")}</td>
+            <td><code>${escapeHtml(c.topic_code)}</code></td>
+            <td>${escapeHtml(c.overall_status)}</td>
             <td>${participants}</td>
             <td>${formatDate(c.updated_at)}</td>
         `;
@@ -431,11 +431,15 @@ async function loadAudit() {
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>${formatDate(r.created_at)}</td>
-            <td>${r.event_type}</td>
-            <td>${r.system_code ?? "—"}</td>
-            <td>${r.conversation_id ? r.conversation_id.slice(0, 8) + "…" : "—"}</td>
-            <td><code>${JSON.stringify(r.detail)}</code></td>
+            <td>${escapeHtml(r.event_type)}</td>
+            <td>${escapeHtml(r.system_code ?? "—")}</td>
+            <td>${r.conversation_id ? escapeHtml(r.conversation_id.slice(0, 8)) + "…" : "—"}</td>
+            <td class="audit-detail"><code></code></td>
         `;
+        // textContent, not innerHTML: detail carries data sent by external
+        // systems (see escapeHtml). The .audit-detail CSS lets this long unbroken JSON wrap
+        // instead of pushing the table wider than the page.
+        tr.querySelector(".audit-detail code").textContent = JSON.stringify(r.detail);
         tbody.appendChild(tr);
     }
 
@@ -464,6 +468,20 @@ document.getElementById("btn-audit-next").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 function formatDate(iso) {
     return new Date(iso).toLocaleString("en-GB");
+}
+
+// Every value interpolated into an innerHTML template must go through this.
+// Conversation/audit fields (subject, external_ref, local_status, ...) are
+// sent by external systems, so rendering them as raw HTML would let one of
+// those systems run script in an admin's session - which can't read the
+// httpOnly cookie, but can still call the admin API with it.
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
 }
 
 // ---------------------------------------------------------------------------
