@@ -36,16 +36,26 @@ read the key from `examples/.dummy-simulator.key`.)
 
 ## 2. Run it
 
-**With docker compose, next to the bridge** (from the repo root):
+**With docker compose, next to the bridge** - no repo checkout needed,
+just the repo's `docker-compose.yml` (and `.env`) on the host:
 
 ```bash
-docker compose --profile simulator up -d --build
+docker compose --profile simulator pull
+docker compose --profile simulator up -d
 ```
 
-It's built from `./simulator` (no published image) and listens on
-`127.0.0.1:8090` only - the UI has no login, so on a shared VM reach it
-through an SSH tunnel (`ssh -L 8090:localhost:8090 <vm>`), then open
-http://localhost:8090. Its data lives in the `simulator_data` volume.
+The image, `ghcr.io/alexsantos/ticket-bridge-simulator`, is published by
+the same workflow as the bridge's, with the same tags (`latest` from
+`main`, `X.Y.Z` from version tags). From a repo checkout,
+`docker compose --profile simulator up -d --build` builds it locally
+instead. The first time the image is published, GHCR creates the package
+as **private**: make it public in its GitHub package settings, or
+`docker login ghcr.io` on the host.
+
+It listens on `127.0.0.1:8090` only - the UI has no login, so on a shared
+VM reach it through an SSH tunnel (`ssh -L 8090:localhost:8090 <vm>`),
+then open http://localhost:8090. Its data lives in the `simulator_data`
+volume.
 
 **Directly, for local development:**
 

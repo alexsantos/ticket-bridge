@@ -457,11 +457,12 @@ way if the contract changes - importing `app.schemas` would hide exactly
 the drift it exists to catch. Same repo rather than a separate one so it
 versions and runs (compose profile `simulator`) alongside the bridge it
 targets; being self-contained, it can move to its own repo as-is if other
-teams ever want it as a reference adapter.
+teams ever want it as a reference adapter. It's published as its own image
+(`ghcr.io/<repo>-simulator`, same tags as the bridge) so hosts that only
+`docker compose pull` can run it too.
 
 **Consciously not done**: no login on the simulator UI (it's a dev tool -
-compose binds it to 127.0.0.1 only); no published image (built from
-`./simulator` by compose); no bridge admin calls - registering it as a
+compose binds it to 127.0.0.1 only); no bridge admin calls - registering it as a
 system stays a manual step in the bridge's Systems tab, so the simulator
 never needs admin credentials.
 

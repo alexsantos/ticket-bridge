@@ -79,13 +79,16 @@ services:
 
   # Optional stand-in external system for testing (simulator/README.md).
   # Only started with the profile:
-  #   docker compose --profile simulator up -d --build
-  # Built from ./simulator rather than pulled - it isn't published as an
-  # image. Its port is bound to 127.0.0.1 only: the simulator UI has no
+  #   docker compose --profile simulator pull
+  #   docker compose --profile simulator up -d
+  # Published by .github/workflows/docker-publish.yml alongside the bridge
+  # (same tags). `build:` is only used by `up --build`, from a repo
+  # checkout. Its port is bound to 127.0.0.1 only: the simulator UI has no
   # login, so reach it through an SSH tunnel on a shared VM. The bridge
   # delivers to it at http://simulator:8090/webhook over the compose network.
   simulator:
     profiles: ["simulator"]
+    image: ghcr.io/alexsantos/ticket-bridge-simulator:latest
     build: ./simulator
     ports:
       - "127.0.0.1:8090:8090"
