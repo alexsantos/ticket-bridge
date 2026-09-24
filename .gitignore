@@ -11,3 +11,6 @@ venv/
 .DS_Store
 .claude/
 internal/
+
+# dummy_system.sh state (API key, conversation refs)
+examples/.dummy-*

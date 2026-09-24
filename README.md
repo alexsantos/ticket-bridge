@@ -231,7 +231,9 @@ ticket-bridge/
 │   ├── README.md                # flagship walkthrough: patient insurance verification "chat"
 │   ├── walkthrough.sh           # runs the full scenario locally
 │   ├── live_delivery_demo.sh    # same, but with a real HTTP delivery you can watch
-│   └── mock_receiver.py         # tiny local webhook stand-in used by live_delivery_demo.sh
+│   ├── dummy_system.sh          # plays the other side when only one real system is connected
+│   ├── _admin_session.sh        # admin login helper sourced by the scripts above
+│   └── mock_receiver.py         # tiny local webhook stand-in used by live_delivery_demo.sh / dummy_system.sh
 ├── pyproject.toml               # project metadata and dependencies (uv)
 ├── uv.lock                      # pinned, reproducible dependency versions
 ├── .python-version              # Python version pinned for uv

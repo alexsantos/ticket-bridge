@@ -45,10 +45,14 @@ Two ways to run it:
   `system_b`'s original `base_url` automatically when the script exits.
 
 Both scripts assume the app is running locally (`uv run uvicorn
-app.main:app --reload --port 8080`, see README.md section 3) with
-`migrations/001_initial_schema.sql`, `002_seed_example.sql`, and
-`003_standardize_ticket_status.sql` applied, and read
-`SCHEDULER_SHARED_SECRET` from `../.env` if present.
+app.main:app --reload --port 8080`, see README.md section 3) with the
+migrations applied (002's seed data included), and read
+`SCHEDULER_SHARED_SECRET` from `../.env` if present. Both also call admin
+endpoints (`/systems`, `/conversations`, `/audit`), which need an admin
+session since 0.6.0: set `ADMIN_PASSWORD` (and `ADMIN_USERNAME` if it
+isn't `admin`), or you'll be prompted for it (`_admin_session.sh` handles
+the login and logs out when the script exits). `BASE_URL` overrides the
+default `http://localhost:8080`.
 
 ```bash
 chmod +x examples/*.sh   # if not already executable
@@ -56,6 +60,45 @@ chmod +x examples/*.sh   # if not already executable
 # or
 ./examples/live_delivery_demo.sh
 ```
+
+## Simulating the other side: `dummy_system.sh`
+
+When only one real system is connected (e.g. in dev), `dummy_system.sh`
+registers a dummy system and lets you play its side of the conversation:
+it receives what the bridge delivers and replies through
+`/api/v1/events`, exactly as a real system would.
+
+```bash
+# 1. Create the dummy, subscribed to your real system's topic, with its own
+#    inbound API key (saved to examples/.dummy-dummy.key, gitignored)
+./examples/dummy_system.sh setup PATIENT_ADMIN
+
+# 2. In a second terminal, run the receiver its base_url points at. Use
+#    --compose when the bridge runs under docker compose: the receiver then
+#    runs inside the bridge's own container, so localhost reaches it.
+./examples/dummy_system.sh receive --compose
+
+# 3. Open a ticket from your real system. When the receiver prints the
+#    ticket.created delivery, reply using its conversation_id:
+./examples/dummy_system.sh reply <conversation_id> in_progress "Picked up"
+METADATA='{"insurance_number": "INS-2298104"}' \
+  ./examples/dummy_system.sh reply <conversation_id> resolved "Coverage confirmed"
+
+# Or have the dummy start the conversation instead:
+./examples/dummy_system.sh open PATIENT_ADMIN "Patient #4471 - no insurance on file"
+
+# 4. When you're done: deactivate it, drop its topics, revoke its keys
+./examples/dummy_system.sh teardown
+```
+
+Every reply to the same conversation reuses the dummy's own ticket ref,
+so the real system sees updates to one ticket, not a new one each time.
+`./examples/dummy_system.sh sync` delivers immediately instead of waiting
+for the scheduler (needs `SCHEDULER_SHARED_SECRET`). `setup` and
+`teardown` need admin credentials, like the scripts above; `open` and
+`reply` only use the dummy's own API key. Leave `teardown` for the end:
+while the dummy stays active and subscribed, it receives fan-out for
+every ticket on its topics.
 
 ---
 

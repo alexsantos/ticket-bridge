@@ -12,7 +12,9 @@
 # gateway address (Linux).
 #
 # Prerequisites: app running locally with 001+002 migrations applied
-# (see README.md section 3).
+# (see README.md section 3). Changing system_b's base_url needs an admin
+# session: set ADMIN_PASSWORD (and ADMIN_USERNAME if not "admin"), or
+# you'll be prompted - see _admin_session.sh.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -28,27 +30,31 @@ fi
 json() { python3 -m json.tool; }
 field() { python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
 
+source ./_admin_session.sh
+admin_login
+
 echo "==> Starting mock receiver on port $RECEIVER_PORT"
 python3 mock_receiver.py "$RECEIVER_PORT" &
 RECEIVER_PID=$!
 sleep 1
 
 echo "==> Reading system_b's current base_url (to restore afterwards)"
-ORIGINAL_BASE_URL=$(curl -s "$BASE_URL/api/v1/systems/system_b" | field base_url)
+ORIGINAL_BASE_URL=$(admin_curl "$BASE_URL/api/v1/systems/system_b" | field base_url)
 echo "    was: $ORIGINAL_BASE_URL"
 
 cleanup() {
   echo
   echo "==> Restoring system_b's base_url and stopping the mock receiver"
-  curl -s -X PATCH "$BASE_URL/api/v1/systems/system_b" \
+  admin_curl -X PATCH "$BASE_URL/api/v1/systems/system_b" \
     -H "Content-Type: application/json" \
     -d "{\"base_url\": \"$ORIGINAL_BASE_URL\"}" > /dev/null
   kill "$RECEIVER_PID" 2>/dev/null || true
+  admin_logout
 }
 trap cleanup EXIT
 
 echo "==> Pointing system_b at the mock receiver instead"
-curl -s -X PATCH "$BASE_URL/api/v1/systems/system_b" \
+admin_curl -X PATCH "$BASE_URL/api/v1/systems/system_b" \
   -H "Content-Type: application/json" \
   -d "{\"base_url\": \"http://localhost:$RECEIVER_PORT/webhook\"}" | json
 

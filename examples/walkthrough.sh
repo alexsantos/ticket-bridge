@@ -15,7 +15,9 @@
 # delivery happen, run live_delivery_demo.sh instead.
 #
 # Prerequisites: app running locally with 001+002+003 migrations applied
-# (see README.md section 3).
+# (see README.md section 3). The final conversation/audit lookups need an
+# admin session: set ADMIN_PASSWORD (and ADMIN_USERNAME if not "admin"),
+# or you'll be prompted - see _admin_session.sh.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -29,6 +31,11 @@ fi
 
 json() { python3 -m json.tool; }
 field() { python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
+
+# Log in up front, so a wrong password fails before any events are sent.
+source ./_admin_session.sh
+admin_login
+trap admin_logout EXIT
 
 echo "### 1. system_a flags that the patient has no insurance on file (no conversation_id yet)"
 RESPONSE=$(curl -s -X POST "$BASE_URL/api/v1/events" \
@@ -111,7 +118,7 @@ echo "### 6. Trigger sync again and inspect the final state"
 curl -s -X POST "$BASE_URL/api/v1/sync" -H "X-Scheduler-Secret: $SCHEDULER_SHARED_SECRET" | json
 echo
 echo "### Conversation state:"
-curl -s "$BASE_URL/api/v1/conversations/$CONVERSATION_ID" | json
+admin_curl "$BASE_URL/api/v1/conversations/$CONVERSATION_ID" | json
 echo
 echo "### Audit trail:"
-curl -s "$BASE_URL/api/v1/audit?conversation_id=$CONVERSATION_ID" | json
+admin_curl "$BASE_URL/api/v1/audit?conversation_id=$CONVERSATION_ID" | json
