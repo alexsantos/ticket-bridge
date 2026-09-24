@@ -49,7 +49,10 @@
         <section id="tab-systems" class="tab-panel active">
             <div class="panel-header">
                 <h2>Federated Systems</h2>
-                <button id="btn-new-system" class="btn-primary">+ New system</button>
+                <div class="panel-actions">
+                    <button type="button" class="btn-refresh" data-refresh="systems" title="Reload this section's data">↻ Refresh</button>
+                    <button id="btn-new-system" class="btn-primary">+ New system</button>
+                </div>
             </div>
             <table id="table-systems">
                 <thead>
@@ -154,7 +157,10 @@
         <section id="tab-topics" class="tab-panel">
             <div class="panel-header">
                 <h2>Topics</h2>
-                <button id="btn-new-topic" class="btn-primary">+ New topic</button>
+                <div class="panel-actions">
+                    <button type="button" class="btn-refresh" data-refresh="topics" title="Reload this section's data">↻ Refresh</button>
+                    <button id="btn-new-topic" class="btn-primary">+ New topic</button>
+                </div>
             </div>
             <table id="table-topics">
                 <thead>
@@ -194,16 +200,19 @@
         <section id="tab-conversations" class="tab-panel">
             <div class="panel-header">
                 <h2>Conversations</h2>
-                <label>Filter by system:
-                    <select id="filter-conversations-system">
-                        <option value="">All</option>
-                    </select>
-                </label>
-                <label>Filter by topic:
-                    <select id="filter-conversations-topic">
-                        <option value="">All</option>
-                    </select>
-                </label>
+                <div class="panel-actions">
+                    <label>Filter by system:
+                        <select id="filter-conversations-system">
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <label>Filter by topic:
+                        <select id="filter-conversations-topic">
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <button type="button" class="btn-refresh" data-refresh="conversations" title="Reload this section's data">↻ Refresh</button>
+                </div>
             </div>
             <table id="table-conversations">
                 <thead>
@@ -220,11 +229,14 @@
         <section id="tab-audit" class="tab-panel">
             <div class="panel-header">
                 <h2>Audit Log</h2>
-                <label>Filter by system:
-                    <select id="filter-audit-system">
-                        <option value="">All</option>
-                    </select>
-                </label>
+                <div class="panel-actions">
+                    <label>Filter by system:
+                        <select id="filter-audit-system">
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <button type="button" class="btn-refresh" data-refresh="audit" title="Reload this section's data">↻ Refresh</button>
+                </div>
             </div>
             <table id="table-audit">
                 <thead>

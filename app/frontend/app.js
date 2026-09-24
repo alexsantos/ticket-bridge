@@ -118,6 +118,7 @@ topicForm.addEventListener("submit", async () => {
 
 function populateTopicFilter() {
     const sel = document.getElementById("filter-conversations-topic");
+    const selected = sel.value; // keep the active filter across a refresh
     while (sel.options.length > 1) sel.remove(1);
     for (const t of allTopics) {
         const opt = document.createElement("option");
@@ -125,6 +126,8 @@ function populateTopicFilter() {
         opt.textContent = `${t.name} (${t.code})`;
         sel.appendChild(opt);
     }
+    sel.value = selected;
+    if (sel.value !== selected) sel.value = ""; // topic no longer exists
 }
 
 function renderSystemTopicsCheckboxes(checkedCodes = []) {
@@ -156,6 +159,8 @@ async function loadSystems() {
         document.getElementById("filter-conversations-system"),
         document.getElementById("filter-audit-system"),
     ];
+    // Keep each filter's active selection across a refresh.
+    const selected = selects.map((sel) => sel.value);
     selects.forEach((sel) => {
         while (sel.options.length > 1) sel.remove(1);
     });
@@ -181,6 +186,11 @@ async function loadSystems() {
             sel.appendChild(opt);
         });
     }
+
+    selects.forEach((sel, i) => {
+        sel.value = selected[i];
+        if (sel.value !== selected[i]) sel.value = ""; // system no longer exists
+    });
 }
 
 const systemDialog = document.getElementById("dialog-system");
@@ -461,6 +471,30 @@ document.getElementById("btn-audit-prev").addEventListener("click", () => {
 document.getElementById("btn-audit-next").addEventListener("click", () => {
     auditOffset += AUDIT_PAGE_SIZE;
     loadAudit();
+});
+
+// ---------------------------------------------------------------------------
+// Refresh buttons (one per section) - reload that section's data in place,
+// keeping its filters and, for Audit, the current page.
+// ---------------------------------------------------------------------------
+const refreshers = {
+    // Systems also reloads topics: the system dialog's topic checkboxes
+    // are built from allTopics.
+    systems: async () => { await loadTopics(); await loadSystems(); },
+    topics: loadTopics,
+    conversations: loadConversations,
+    audit: loadAudit,
+};
+
+document.querySelectorAll(".btn-refresh").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+            await refreshers[btn.dataset.refresh]();
+        } finally {
+            btn.disabled = false;
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
