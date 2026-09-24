@@ -1,0 +1,23 @@
+[project]
+name = "ticket-bridge-simulator"
+version = "0.1.0"
+description = "Stand-in external support system for exercising Ticket Bridge end to end."
+license = "MIT"
+requires-python = ">=3.14"
+# Same pins as the bridge (../pyproject.toml), but a separate project on
+# purpose: the simulator talks to the bridge only over HTTP, like any real
+# integrating system, and never imports from app/.
+dependencies = [
+    "fastapi==0.139.0",
+    "uvicorn[standard]==0.50.2",
+    "httpx==0.28.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

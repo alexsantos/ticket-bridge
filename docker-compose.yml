@@ -77,5 +77,27 @@ services:
       db:
         condition: service_healthy
 
+  # Optional stand-in external system for testing (simulator/README.md).
+  # Only started with the profile:
+  #   docker compose --profile simulator up -d --build
+  # Built from ./simulator rather than pulled - it isn't published as an
+  # image. Its port is bound to 127.0.0.1 only: the simulator UI has no
+  # login, so reach it through an SSH tunnel on a shared VM. The bridge
+  # delivers to it at http://simulator:8090/webhook over the compose network.
+  simulator:
+    profiles: ["simulator"]
+    build: ./simulator
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks:
+      - ticket-bridge
+    environment:
+      SIM_BRIDGE_URL: http://app:8080
+    volumes:
+      - simulator_data:/data
+    depends_on:
+      - app
+
 volumes:
   db_data:
+  simulator_data:

@@ -234,6 +234,7 @@ ticket-bridge/
 │   ├── dummy_system.sh          # plays the other side when only one real system is connected
 │   ├── _admin_session.sh        # admin login helper sourced by the scripts above
 │   └── mock_receiver.py         # tiny local webhook stand-in used by live_delivery_demo.sh / dummy_system.sh
+├── simulator/                   # stand-in external system with a UI: send/receive tickets (see simulator/README.md)
 ├── pyproject.toml               # project metadata and dependencies (uv)
 ├── uv.lock                      # pinned, reproducible dependency versions
 ├── .python-version              # Python version pinned for uv
@@ -318,6 +319,12 @@ For a full walkthrough of this scenario in both directions (including a
 live-delivery demo that lets you watch the real fan-out payload arrive
 over HTTP instead of just reading about it), see
 [`examples/README.md`](examples/README.md).
+
+To exchange tickets with the bridge interactively - e.g. when only one
+real system is connected in dev - run the **simulator**, a stand-in
+external system with its own small UI for sending, receiving and replying
+to tickets: `docker compose --profile simulator up -d --build`, see
+[`simulator/README.md`](simulator/README.md).
 
 To run the automated tests:
 ```bash

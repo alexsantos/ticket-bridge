@@ -439,6 +439,32 @@ Decision 10 (a natural next extension point if more than one human admin
 is ever needed). No pruning of expired/revoked `sessions` rows - mirrors
 `api_keys`, which also never prunes; fine at this data volume.
 
+## Decision 12 — The simulator is an independent sub-project, not part of the app
+
+**Problem closed**: testing a conversation end to end needs at least two
+systems, and a dev environment often has only one real one.
+`examples/dummy_system.sh` covers that from a terminal; `simulator/` is
+the same idea with a UI - a stand-in external system that sends, receives
+and replies to tickets.
+
+**Decision made**: it lives in this repo (`simulator/`) but shares nothing
+with `app/` at the code level - its own `pyproject.toml`/`uv.lock`,
+Dockerfile, CI job, and its own copy of the integration contract
+(`simulator/sim/contract.py`), talking to the bridge only over the
+public HTTP API with a per-system API key. That's deliberate: it should
+behave exactly like another team's adapter, including breaking the same
+way if the contract changes - importing `app.schemas` would hide exactly
+the drift it exists to catch. Same repo rather than a separate one so it
+versions and runs (compose profile `simulator`) alongside the bridge it
+targets; being self-contained, it can move to its own repo as-is if other
+teams ever want it as a reference adapter.
+
+**Consciously not done**: no login on the simulator UI (it's a dev tool -
+compose binds it to 127.0.0.1 only); no published image (built from
+`./simulator` by compose); no bridge admin calls - registering it as a
+system stays a manual step in the bridge's Systems tab, so the simulator
+never needs admin credentials.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the

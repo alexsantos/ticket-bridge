@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<!--
+    Ticket Bridge Simulator - a stand-in external support system.
+    Tickets: open tickets through the bridge, see what it delivers, reply.
+    Config: bridge URL, this system's API key, webhook auth. See
+    simulator/README.md.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Bridge Simulator</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230f766e'/%3E%3Cpath d='M4 5h8M4 8h8M4 11h5' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Ticket Bridge Simulator</h1>
+        <p class="subtitle">A stand-in support system: <strong id="header-system">…</strong> at <span id="header-bridge">…</span></p>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab-btn active" data-tab="tickets">Tickets</button>
+        <button class="tab-btn" data-tab="config">Config</button>
+    </nav>
+
+    <main>
+        <!-- ================= TICKETS ================= -->
+        <section id="tab-tickets" class="tab-panel active">
+            <div class="panel-header">
+                <h2>Tickets</h2>
+                <div class="panel-actions">
+                    <label class="checkbox"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
+                    <button type="button" id="btn-refresh" class="btn-secondary">↻ Refresh</button>
+                    <button type="button" id="btn-new-ticket" class="btn-primary">+ New ticket</button>
+                </div>
+            </div>
+
+            <div class="split">
+                <div class="ticket-list">
+                    <table id="table-tickets">
+                        <thead><tr><th>Ref</th><th>Subject</th><th>Status</th><th>Updated</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    <p id="tickets-empty" class="hint" hidden>
+                        No tickets yet. Open one with "+ New ticket", or open one from another
+                        system on a topic this system subscribes to.
+                    </p>
+                </div>
+
+                <div id="ticket-detail" class="ticket-detail">
+                    <p class="hint">Select a ticket to see its conversation.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= CONFIG ================= -->
+        <section id="tab-config" class="tab-panel">
+            <div class="panel-header"><h2>Config</h2></div>
+            <form id="form-config" class="card">
+                <h3>Connection to the bridge</h3>
+                <label>Bridge URL (including any path prefix)
+                    <input type="url" name="bridge_url" required placeholder="http://localhost:8080">
+                </label>
+                <label>System code (as registered in the bridge - shown on messages you send)
+                    <input type="text" name="system_code" placeholder="e.g. simulator">
+                </label>
+                <label>API key (the inbound key the bridge generated for this system)
+                    <input type="password" name="api_key" autocomplete="off">
+                </label>
+                <div class="row">
+                    <button type="button" id="btn-test" class="btn-secondary">Test saved connection</button>
+                    <span id="test-result" class="hint" aria-live="polite"></span>
+                </div>
+
+                <h3>Tickets</h3>
+                <label>Ticket ref prefix (this system's own ticket IDs, e.g. SIM-0001)
+                    <input type="text" name="ref_prefix" required>
+                </label>
+                <label>Default topic for new tickets
+                    <input type="text" name="default_topic" placeholder="e.g. PATIENT_ADMIN">
+                </label>
+
+                <h3>Webhook (bridge → this system)</h3>
+                <p class="hint">
+                    Set the system's <strong>Base URL</strong> in the bridge to
+                    <code id="webhook-url"></code> - or, under docker compose,
+                    <code>http://simulator:8090/webhook</code>.
+                </p>
+                <label>Expected auth header
+                    <input type="text" name="inbound_header" placeholder="X-API-Key">
+                </label>
+                <label>Expected header value (optional - leave empty to accept unauthenticated deliveries)
+                    <input type="password" name="inbound_secret" autocomplete="off">
+                </label>
+                <p class="hint">
+                    Must match exactly what the bridge sends: its value prefix (e.g. "Bearer ")
+                    followed by the secret its <code>secret_ref</code> resolves to.
+                </p>
+                <label class="checkbox" id="clear-inbound-secret-field" hidden>
+                    <input type="checkbox" name="clear_inbound_secret"> Clear stored header value
+                </label>
+
+                <div class="row">
+                    <button type="submit" class="btn-primary">Save</button>
+                    <span id="config-saved" class="hint" aria-live="polite"></span>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <dialog id="dialog-new-ticket">
+        <form id="form-new-ticket">
+            <h3>New ticket</h3>
+            <label>Topic
+                <input type="text" name="topic_code" required placeholder="e.g. PATIENT_ADMIN">
+            </label>
+            <label>Subject
+                <input type="text" name="subject" required>
+            </label>
+            <label>Status
+                <select name="status" class="status-select"></select>
+            </label>
+            <label>Note (sent as metadata.note)
+                <textarea name="note" rows="3"></textarea>
+            </label>
+            <label>Extra metadata (optional JSON object)
+                <textarea name="metadata" rows="3" placeholder='{"insurance_number": "INS-2298104"}'></textarea>
+            </label>
+            <p class="form-error" hidden></p>
+            <div class="dialog-actions">
+                <button type="button" class="btn-secondary" id="btn-cancel-new-ticket">Cancel</button>
+                <button type="submit" class="btn-primary">Send to bridge</button>
+            </div>
+        </form>
+    </dialog>
+
+    <template id="tpl-detail">
+        <div class="detail-header">
+            <div>
+                <h3 class="detail-title"></h3>
+                <p class="detail-meta"></p>
+            </div>
+            <span class="badge detail-status"></span>
+        </div>
+        <p class="hint warning detail-unlinked" hidden>
+            Not linked yet: the bridge doesn't know this ticket's ref until you reply,
+            so it keeps delivering updates as <code>ticket.created</code>.
+        </p>
+        <ol class="timeline"></ol>
+        <form class="reply-form">
+            <h4>Reply</h4>
+            <div class="row">
+                <label>Status <select name="status" class="status-select"></select></label>
+            </div>
+            <label>Note
+                <textarea name="note" rows="2"></textarea>
+            </label>
+            <label>Extra metadata (optional JSON object)
+                <textarea name="metadata" rows="2"></textarea>
+            </label>
+            <p class="form-error" hidden></p>
+            <div class="dialog-actions">
+                <button type="submit" class="btn-primary">Send reply</button>
+            </div>
+        </form>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+</html>
