@@ -85,7 +85,9 @@
                 <p class="hint">
                     Set the system's <strong>Base URL</strong> in the bridge to
                     <code id="webhook-url"></code> - or, under docker compose,
-                    <code>http://simulator:8090/webhook</code>.
+                    <code>http://simulator-a:8090/webhook</code> /
+                    <code>http://simulator-b:8090/webhook</code>
+                    (the service name, not the host port).
                 </p>
                 <label>Expected auth header
                     <input type="text" name="inbound_header" placeholder="X-API-Key">

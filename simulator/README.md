@@ -21,18 +21,25 @@ State (config, tickets, messages) is a SQLite file in `SIM_DATA_DIR`.
 
 ## 1. Register it in the bridge
 
-In the bridge's admin panel, **Systems → + New system**:
+The compose file runs **two** simulators, `simulator-a` and `simulator-b`,
+so you can play both sides of a conversation (or use just one next to a
+real system). Register each one you use as its own system in the bridge's
+admin panel, **Systems → + New system**:
 
-| Field     | Value |
-|-----------|-------|
-| Code      | e.g. `simulator` |
-| Base URL  | `http://simulator:8090/webhook` under docker compose, or `http://localhost:8090/webhook` when both run directly on your machine |
-| Topics    | the topic(s) you want to exchange tickets on |
+| | simulator-a | simulator-b |
+|---|---|---|
+| Code | e.g. `simulator_a` | e.g. `simulator_b` |
+| Base URL | `http://simulator-a:8090/webhook` | `http://simulator-b:8090/webhook` |
+| Topics | the topic(s) to exchange tickets on - the same one on both | same |
 
-Save, reopen it, and **generate an inbound API key** - copy it, it's shown
-once. (Or: `./examples/dummy_system.sh setup <topic>` with
-`DUMMY_CODE=simulator DUMMY_BASE_URL=http://simulator:8090/webhook`, then
-read the key from `examples/.dummy-simulator.key`.)
+(Running directly on your machine instead of in compose, the Base URL is
+`http://localhost:<its port>/webhook`.) Save, reopen it, and **generate
+an inbound API key** - copy it, it's shown once. Each simulator gets its
+own key.
+
+Before 0.8.1 there was a single service called `simulator`; `simulator-a`
+keeps that name as a network alias and uses the same data volume, so a
+system registered as `http://simulator:8090/webhook` keeps working.
 
 ## 2. Run it
 
@@ -41,8 +48,12 @@ just the repo's `docker-compose.yml` (and `.env`) on the host:
 
 ```bash
 docker compose --profile simulator pull
-docker compose --profile simulator up -d
+docker compose --profile simulator up -d --remove-orphans
 ```
+
+(`--remove-orphans` stops the pre-0.8.1 `simulator` container if it's
+still running, which would otherwise keep port 8090.) To run only one of
+them: `docker compose --profile simulator up -d simulator-a`.
 
 The image, `ghcr.io/alexsantos/ticket-bridge-simulator`, is published by
 the same workflow as the bridge's, with the same tags (`latest` from
@@ -52,10 +63,18 @@ instead. The first time the image is published, GHCR creates the package
 as **private**: make it public in its GitHub package settings, or
 `docker login ghcr.io` on the host.
 
-It listens on `127.0.0.1:8090` only - the UI has no login, so on a shared
-VM reach it through an SSH tunnel (`ssh -L 8090:localhost:8090 <vm>`),
-then open http://localhost:8090. Its data lives in the `simulator_data`
-volume.
+They listen on the host's `127.0.0.1` only - `simulator-a` on port 8090,
+`simulator-b` on 8091 - because the UI has no login. On a shared VM,
+reach both through one SSH tunnel, then open http://localhost:8090 and
+http://localhost:8091:
+
+```bash
+ssh -L 8090:localhost:8090 -L 8091:localhost:8091 <vm>
+```
+
+Each has its own data volume (`simulator_data` for A, `simulator_b_data`
+for B), and compose seeds their system code and ticket ref prefix
+(`SIMA-0001`, `SIMB-0001`) so the two are easy to tell apart.
 
 **Directly, for local development:**
 
@@ -66,10 +85,10 @@ uv run uvicorn sim.main:app --port 8090
 
 ## 3. Configure it
 
-Open the **Config** tab, paste the API key, set the bridge URL
-(`http://app:8080` under compose - already the default there - or
-e.g. `http://localhost:8080`), the system code you registered, and a
-default topic. **Test saved connection** checks the bridge is reachable;
+In each simulator's **Config** tab, paste its own API key, check the
+system code matches what you registered, and set a default topic. The
+bridge URL is already `http://app:8080` under compose (set it to e.g.
+`http://localhost:8080` when running directly). **Test saved connection** checks the bridge is reachable;
 the API key itself is only checked when you send a ticket (there's no
 side-effect-free way to validate it).
 

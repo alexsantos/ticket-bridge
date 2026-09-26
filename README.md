@@ -378,7 +378,9 @@ over HTTP instead of just reading about it), see
 To exchange tickets with the bridge interactively - e.g. when only one
 real system is connected in dev - run the **simulator**, a stand-in
 external system with its own small UI for sending, receiving and replying
-to tickets: `docker compose --profile simulator up -d`, see
+to tickets. The compose file has two of them (`simulator-a` and
+`simulator-b`), so you can play both sides of a conversation:
+`docker compose --profile simulator up -d`, see
 [`simulator/README.md`](simulator/README.md).
 
 To run the automated tests:

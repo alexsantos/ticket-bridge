@@ -41,6 +41,14 @@
 networks:
   ticket-bridge:
 
+# Settings shared by simulator-a and simulator-b (merged in with <<:).
+x-simulator: &simulator
+  profiles: ["simulator"]
+  image: ghcr.io/alexsantos/ticket-bridge-simulator:latest
+  build: ./simulator
+  depends_on:
+    - app
+
 services:
   db:
     image: postgres:17-alpine
@@ -79,30 +87,49 @@ services:
       db:
         condition: service_healthy
 
-  # Optional stand-in external system for testing (simulator/README.md).
-  # Only started with the profile:
+  # Optional stand-in external systems for testing (simulator/README.md):
+  # two independent simulators, so you can play both sides of a
+  # conversation. Only started with the profile:
   #   docker compose --profile simulator pull
   #   docker compose --profile simulator up -d
   # Published by .github/workflows/docker-publish.yml alongside the bridge
   # (same tags). `build:` is only used by `up --build`, from a repo
-  # checkout. Its port is bound to 127.0.0.1 only: the simulator UI has no
+  # checkout. Ports are bound to 127.0.0.1 only: the simulator UI has no
   # login, so reach it through an SSH tunnel on a shared VM. The bridge
-  # delivers to it at http://simulator:8090/webhook over the compose network.
-  simulator:
-    profiles: ["simulator"]
-    image: ghcr.io/alexsantos/ticket-bridge-simulator:latest
-    build: ./simulator
+  # delivers to them over the compose network at
+  # http://simulator-a:8090/webhook and http://simulator-b:8090/webhook.
+  simulator-a:
+    <<: *simulator
     ports:
       - "127.0.0.1:8090:8090"
+    networks:
+      ticket-bridge:
+        # Its name before 0.8.1, so a system registered in the bridge with
+        # Base URL http://simulator:8090/webhook keeps receiving deliveries.
+        aliases: [simulator]
+    environment:
+      SIM_BRIDGE_URL: http://app:8080
+      SIM_SYSTEM_CODE: simulator_a
+      SIM_REF_PREFIX: SIMA
+    volumes:
+      # Same volume as before the rename, so existing tickets and saved
+      # config are kept.
+      - simulator_data:/data
+
+  simulator-b:
+    <<: *simulator
+    ports:
+      - "127.0.0.1:8091:8090"
     networks:
       - ticket-bridge
     environment:
       SIM_BRIDGE_URL: http://app:8080
+      SIM_SYSTEM_CODE: simulator_b
+      SIM_REF_PREFIX: SIMB
     volumes:
-      - simulator_data:/data
-    depends_on:
-      - app
+      - simulator_b_data:/data
 
 volumes:
   db_data:
   simulator_data:
+  simulator_b_data:
