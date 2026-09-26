@@ -141,6 +141,57 @@ locally).
 
 ---
 
+## Credentials at a glance
+
+There are only four credentials, and each one protects exactly one thing.
+Every integrated system has its own pair - **one per direction**:
+
+```mermaid
+flowchart LR
+    SYS["Integrated system<br/>(each one has its own ① and ②)"]
+    BR["Ticket Bridge"]
+    ADM["Admin<br/>(browser)"]
+    ENV[".env<br/>SECRETS_ENCRYPTION_KEY"]
+    DB[("Database")]
+
+    SYS -- "① inbound API key<br/>X-API-Key on POST /api/v1/events" --> BR
+    BR -- "② outbound secret<br/>in the configured header, on every delivery" --> SYS
+    ADM -- "③ admin password<br/>then a session cookie" --> BR
+    ENV -. "④ encrypts ② at rest" .-> BR
+    BR --- DB
+```
+
+| | Credential | Direction | Who creates it | Stored as | To rotate |
+|---|---|---|---|---|---|
+| ① | **Inbound API key** | system → bridge | The bridge generates it (Systems → system → *+ Generate key*), shown once; you hand it to that system's team | SHA-256 hash only | Generate a new one, then *Revoke* the old |
+| ② | **Outbound secret** | bridge → system | That system's team decides (whatever their webhook checks); you enter it in the system's dialog | Encrypted with ④ | Type the new value, *Save* |
+| ③ | **Admin password** | admin → admin panel | You (seeded as `admin` / `ChangeMe-Immediately!` - change it) | bcrypt hash | *Change password* in the footer |
+| ④ | **`SECRETS_ENCRYPTION_KEY`** | never sent anywhere | You, once per deployment, in `.env` | Only in the environment | Don't: changing it means re-entering every ② |
+
+**Why two per system instead of one shared secret?** They protect
+different doors and are created by different parties. ① proves to the
+bridge who is calling it; the bridge only keeps its hash, so a leaked
+database can't be used to impersonate a system. ② proves to the system
+that the call really comes from the bridge; the system chooses it, and
+the bridge has to be able to send it, so it's encrypted rather than
+hashed. Sharing one value would mean a leak on either side compromises
+both directions.
+
+**What an integrating team configures on their side**: store ① and send it
+on every call to the bridge; make their webhook accept only requests
+carrying ②. (The simulator's Config tab is exactly this pair: "API key" is
+①, "Expected header value" is ② with its prefix - see
+[`simulator/README.md`](simulator/README.md).)
+
+**Not on this list**: there are no per-system secrets in `.env` - since
+0.8.0 the environment only holds ④ (plus the database URL). The optional
+`SCHEDULER_SHARED_SECRET` is only for an external scheduler on Cloud Run
+that can't log in (section 4.6); on a VM, the in-process scheduler needs
+nothing, and admins trigger a manual sync with their session (*Audit →
+Sync now*).
+
+---
+
 ## 1. Architecture overview
 
 ```
@@ -210,7 +261,7 @@ ticket-bridge/
 │   │   ├── outbox_service.py       # table-based transactional queue (outbox pattern)
 │   │   ├── sync_service.py         # outbox batch processing (called by scheduler.py and api/sync.py)
 │   │   ├── dispatcher.py           # HTTP delivery to each system
-│   │   ├── secrets.py              # secret resolution (Secret Manager / env)
+│   │   ├── secret_store.py         # encryption of stored outbound secrets
 │   │   └── audit_service.py        # audit_log read/write
 │   └── frontend/
 │       ├── index.html           # configuration/audit panel (requires an admin session)
@@ -225,7 +276,8 @@ ticket-bridge/
 │   ├── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
 │   ├── 004_unify_auth_mechanism.sql        # drops auth_type - one generic header-based auth mechanism
 │   ├── 005_admin_authentication.sql        # users/sessions tables + seeded default admin
-│   └── 006_stored_outbound_secrets.sql     # encrypted outbound secret column on systems
+│   ├── 006_stored_outbound_secrets.sql     # encrypted outbound secret column on systems
+│   └── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
 ├── tests/
 │   └── test_payload_builder.py
 ├── examples/
@@ -280,6 +332,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/003_standardize_ticket_
 psql "postgresql://localhost/ticketbridge" -f migrations/004_unify_auth_mechanism.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/005_admin_authentication.sql  # seeds the default admin - see section 5
 psql "postgresql://localhost/ticketbridge" -f migrations/006_stored_outbound_secrets.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/007_retire_secret_ref.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -376,12 +429,9 @@ the same outbox-processing logic as `POST /api/v1/sync` every
 Cloud Scheduler is required. This is why the delivery in the example above
 happens automatically within about two minutes even if you never call
 `/api/v1/sync` yourself; to see it immediately, either lower
-`SYNC_INTERVAL_SECONDS` in `.env` or call the endpoint manually:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/sync \
-  -H "X-Scheduler-Secret: $(grep SCHEDULER_SHARED_SECRET .env | cut -d= -f2)"
-```
+`SYNC_INTERVAL_SECONDS` in `.env` or click **Audit → ⇪ Sync now** in the
+admin panel (`POST /api/v1/sync` with the admin session; see
+`examples/README.md` step 5 for the curl equivalent).
 
 Set `SYNC_SCHEDULER_ENABLED=false` to disable the in-process scheduler
 entirely and drive sync purely through the endpoint (e.g. if you deploy to
@@ -399,15 +449,15 @@ docker build -t ticket-bridge .
 docker run -d --name ticket-bridge \
     -p 8080:8080 \
     -e DATABASE_URL="postgresql://ticketbridge:PASSWORD@your-postgres-host:5432/ticketbridge" \
-    -e SCHEDULER_SHARED_SECRET="$(openssl rand -base64 32)" \
-    -e SYSTEM_A_OUTBOUND_KEY="..." \
+    -e SECRETS_ENCRYPTION_KEY="$(openssl rand -base64 32 | tr '+/' '-_')" \
+    -e ENVIRONMENT=production \
     ticket-bridge
 ```
 
-`SYSTEM_A_OUTBOUND_KEY` above is that system's `auth_config.secret_ref`
-(`system_a_outbound_key`), UPPERCASED - secret resolution does
-`secret_ref.upper()` when reading from the environment (see
-`app/services/secrets.py`).
+`SECRETS_ENCRYPTION_KEY` protects the systems' outbound secrets stored in
+the database - generate it once and keep it (see "Credentials at a
+glance"). Everything else - systems, their secrets and API keys, topics -
+is configured from the admin panel, not the environment.
 
 Run the migrations against that same `DATABASE_URL` first (section 3.2,
 step 4). `SYNC_SCHEDULER_ENABLED` defaults to `true`, so outbox processing
@@ -415,14 +465,6 @@ starts automatically as soon as the container comes up - no Cloud
 Scheduler, no cron, nothing external to configure. The rest of this
 section (4) is GCP/Cloud Run-specific and can be skipped entirely for this
 deployment mode.
-
-> **Secrets outside GCP**: a `secret_ref` is always looked up as an
-> environment variable first (as used above), whatever `ENVIRONMENT` is
-> set to, and only then in Secret Manager (if `GOOGLE_CLOUD_PROJECT` is
-> set) - so a VM can run with `ENVIRONMENT=production` (HTTPS-only session
-> cookie) and still use `.env` secrets. Or skip env vars entirely and set
-> each system's secret from the frontend - see "Outbound secrets" in
-> section 4.7.
 
 ### 3.6. Running with Docker Compose
 
@@ -452,20 +494,17 @@ instances/containers: there's no host port to collide with, and nothing
 outside this compose project's network can reach this database directly.
 
 `app` loads its configuration from that same `.env` (`env_file:` in
-`docker-compose.yml`) - `SCHEDULER_SHARED_SECRET`, `ROOT_PATH`,
-`SYSTEM_A_OUTBOUND_KEY`, `SYSTEM_B_OUTBOUND_TOKEN`, everything - so
+`docker-compose.yml`) - `SECRETS_ENCRYPTION_KEY`, `ROOT_PATH`,
+everything - so
 there's one file to edit regardless of whether you run this via `uv run
 uvicorn` or `docker compose`, not a separate copy hardcoded in the
 compose file. The one exception is `DATABASE_URL`: `docker-compose.yml`
 overrides it to point at `db` (this stack's own Postgres, reachable only
 by that service name on the `ticket-bridge` network) instead of `.env`'s
-`localhost`, which would resolve to the `app` container itself. The
-`.env.example` defaults (`SCHEDULER_SHARED_SECRET`,
-`SYSTEM_A_OUTBOUND_KEY`, `SYSTEM_B_OUTBOUND_TOKEN`) are dev-only
-placeholders matching `002_seed_example.sql`'s seeded `secret_ref`
-values - replace them in `.env` for anything beyond local/dev use, and
-pin `image:` in `docker-compose.yml` to a specific `X.Y.Z` tag instead of
-`latest` (section 7.1 cuts those tags).
+`localhost`, which would resolve to the `app` container itself. For
+anything beyond local/dev use, generate a real `SECRETS_ENCRYPTION_KEY`
+in `.env`, and pin `image:` in `docker-compose.yml` to a specific `X.Y.Z`
+tag instead of `latest` (section 7.1 cuts those tags).
 
 The scheduler starts automatically (`SYNC_SCHEDULER_ENABLED=true` in
 `.env.example`), same as section 3.4.
@@ -611,6 +650,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/005_admin_authentication.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/006_stored_outbound_secrets.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/007_retire_secret_ref.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
@@ -619,22 +660,17 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
 
 ### 4.3. Secrets (Secret Manager)
 
-Each external system has a secret reference (`secret_ref`) in its
-`auth_config` — it's the value the dispatcher uses to authenticate
-outbound calls. The Cloud Scheduler shared secret and the DB password
-should also live here. See section 4.7 for how `auth_config` as a whole
-is configured (there's a single generic mechanism, not a choice of auth
-types — see CLAUDE.md Decision 9).
+Only the bridge's own deployment secrets live here - Cloud Run injects
+them as environment variables (`--set-secrets`, section 4.5), and the app
+itself never calls Secret Manager. The systems' outbound secrets are not
+among them: they're set per system in the admin panel and stored
+encrypted with `SECRETS_ENCRYPTION_KEY` (see "Credentials at a glance").
 
 ```bash
 echo -n "DB_PASSWORD" | gcloud secrets create db-password --data-file=-
+echo -n "$(openssl rand -base64 32 | tr '+/' '-_')" | gcloud secrets create secrets-encryption-key --data-file=-
+# Only for Cloud Scheduler (section 4.6) - a VM doesn't need it:
 echo -n "$(openssl rand -base64 32)" | gcloud secrets create scheduler-shared-secret --data-file=-
-
-# One secret per external system, named exactly like the 'secret_ref'
-# configured in the frontend for that system (Secret Manager lookups use
-# secret_ref as-is, unlike the local .env fallback - see section 3.5):
-echo -n "REPLACE_WITH_REAL_KEY_VALUE" | gcloud secrets create system_a_outbound_key --data-file=-
-echo -n "REPLACE_WITH_REAL_TOKEN_VALUE" | gcloud secrets create system_b_outbound_token --data-file=-
 ```
 
 ### 4.4. Dedicated service account
@@ -670,9 +706,9 @@ gcloud run deploy ticket-bridge \
     --region=europe-west1 \
     --service-account=ticket-bridge-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com \
     --add-cloudsql-instances=YOUR_PROJECT_ID:europe-west1:ticket-bridge-db \
-    --set-env-vars="ENVIRONMENT=production,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,SYNC_SCHEDULER_ENABLED=false" \
+    --set-env-vars="ENVIRONMENT=production,SYNC_SCHEDULER_ENABLED=false" \
     --set-env-vars="DATABASE_URL=postgresql://ticketbridge:PASSWORD@/ticketbridge?host=/cloudsql/YOUR_PROJECT_ID:europe-west1:ticket-bridge-db" \
-    --set-secrets="SCHEDULER_SHARED_SECRET=scheduler-shared-secret:latest" \
+    --set-secrets="SECRETS_ENCRYPTION_KEY=secrets-encryption-key:latest,SCHEDULER_SHARED_SECRET=scheduler-shared-secret:latest" \
     --no-allow-unauthenticated \
     --min-instances=0 \
     --max-instances=3
@@ -716,11 +752,12 @@ gcloud scheduler jobs create http ticket-bridge-sync \
     --headers="X-Scheduler-Secret=VALUE_OF_scheduler-shared-secret"
 ```
 
-> **`/sync` security**: the example above combines Cloud Scheduler's native
-> OIDC (`--no-allow-unauthenticated` on Cloud Run + `--oidc-service-account-email`)
-> with the shared secret header, as defense in depth. In many cases OIDC
-> alone is already sufficient; the shared secret is a simple extra layer to
-> maintain.
+> **`/sync` security**: Cloud Scheduler can't log in, so it's the one
+> caller that uses `SCHEDULER_SHARED_SECRET` (the `X-Scheduler-Secret`
+> header) - accepted only when that variable is set; admins use their
+> session instead. The example above combines it with Cloud Scheduler's
+> native OIDC (`--no-allow-unauthenticated` on Cloud Run +
+> `--oidc-service-account-email`) as defense in depth.
 
 ### 4.7. Registering the real systems
 
@@ -728,10 +765,11 @@ After deployment, access the frontend at `${SERVICE_URL}/` (authenticated
 via IAM — see the next section) and create the real systems in the
 "Systems" tab.
 
-Each system also needs an **inbound** API key — the credential *it* sends
-back to the bridge as `X-API-Key` on `POST /api/v1/events` (not to be
-confused with the outbound `secret_ref` below, which is the bridge's own
-credential for calling *out* to that system). Generate one either from the
+Each system has two credentials, one per direction — see
+[Credentials at a glance](#credentials-at-a-glance) for the picture.
+
+**① Inbound API key** (the system → the bridge) — what *it* sends as
+`X-API-Key` on `POST /api/v1/events`. Generate one either from the
 "Systems" tab (open an already-saved system — a new, unsaved one has no
 `code` to attach a key to yet — and use the "Inbound API keys" section) or
 directly via the API:
@@ -750,14 +788,14 @@ plaintext or hash); `DELETE /api/v1/systems/{code}/api-keys/{key_id}` (or
 the "Revoke" button next to a key in the frontend) revokes one
 immediately.
 
-Outbound authentication is one generic mechanism (CLAUDE.md Decision 9),
-not a choice of types: if a system's `auth_config` has a `secret_ref`,
-the resolved secret is placed into a header — `auth_config.header`
-(defaults to `X-API-Key`), optionally prefixed with
-`auth_config.value_prefix`. The "Auth header name" / "Auth value prefix" /
-"Outbound secret" / "Secret reference" fields on the Systems tab map
-directly onto this.
-Common patterns:
+**② Outbound secret** (the bridge → the system) — what the bridge sends on
+every webhook delivery, in the "Bridge → this system" group of the
+system's dialog (API: `outbound_secret` / `clear_outbound_secret` on
+`POST`/`PATCH /api/v1/systems`). Use whatever value that system's webhook
+expects; it's stored encrypted and never shown again. It goes into one
+header, `auth_config.header` (defaults to `X-API-Key`), optionally
+prefixed with `auth_config.value_prefix` (CLAUDE.md Decision 9). Common
+patterns:
 
 | Pattern | Header name | Value prefix |
 |---|---|---|
@@ -765,26 +803,10 @@ Common patterns:
 | Standard bearer token | `Authorization` | `Bearer ` (with a trailing space) |
 | Some other custom scheme | whatever the destination expects | whatever prefix it expects, if any |
 
-**Outbound secrets** — a system's secret can come from either of two
-places (CLAUDE.md Decision 13):
-
-- **Set in the frontend** ("Outbound secret" in the system's dialog, or
-  `outbound_secret` on `POST`/`PATCH /api/v1/systems`): stored encrypted
-  in the database and never returned by the API — no shell access to the
-  host needed to set or rotate it. Needs `SECRETS_ENCRYPTION_KEY` set once
-  in the environment (see `.env.example` for how to generate one); without
-  it, saving a secret is refused with an explicit error rather than
-  stored in plaintext. Keep the key: if it changes, stored secrets can't
-  be decrypted and must be re-entered (deliveries fail with a message
-  saying so, rather than going out without auth).
-- **By reference** (`auth_config.secret_ref`, "Secret reference" in the
-  dialog): the name of an environment variable (`secret_ref.upper()`) or a
-  Secret Manager secret on the host.
-
-If both are set, the stored secret wins. If a configured secret can't be
-found or decrypted at delivery time, the delivery is marked failed (and
-retried) with the reason in the audit log — it is never sent without
-the header.
+Leave the secret empty for a system that doesn't check who calls it. If a
+stored secret can't be decrypted (e.g. `SECRETS_ENCRYPTION_KEY` changed),
+deliveries to that system fail — and are retried — with the reason in the
+audit log; they're never sent without the header.
 
 There's no built-in HTTP Basic Auth support — it needs a real
 `base64(username:password)` encoding step this project doesn't implement
@@ -836,11 +858,12 @@ known value in git history (same as this project's other seeded dev
 credentials), via the "Change password" link in the frontend footer or
 `POST /api/v1/auth/change-password`.
 
-`POST /api/v1/events` (called by external systems) and `POST
-/api/v1/sync` (called by the Scheduler) are **not** covered by admin
-sessions — they keep their own separate authentication (per-system API
-key / scheduler secret, see `app/security.py`), since those are
-machine-to-machine callers, not human admins.
+`POST /api/v1/events` (called by external systems) is **not** covered by
+admin sessions — it keeps its own per-system API key (credential ① in
+[Credentials at a glance](#credentials-at-a-glance)), since those are
+machine-to-machine callers, not human admins. `POST /api/v1/sync` accepts
+an admin session (*Audit → Sync now*), plus `SCHEDULER_SHARED_SECRET` only
+if you configured one for Cloud Scheduler (section 4.6).
 
 An external layer (Cloud Run IAP, an authenticated `gcloud run services
 proxy` tunnel, or your reverse proxy's own auth) is now optional

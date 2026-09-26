@@ -42,9 +42,9 @@ async def deliver(
     that need something else (OAuth2 token exchange, HMAC request
     signing) aren't supported today.
 
-    `resolved_secret` is the already-resolved value of the secret
-    referenced in auth_config['secret_ref'] (see secrets.py) - the
-    dispatcher never fetches secrets directly, it only applies them.
+    `resolved_secret` is the system's already-decrypted outbound secret
+    (see sync_service.resolve_outbound_secret) - the dispatcher never
+    reads secrets itself, it only applies them.
     """
     settings = get_settings()
     headers = {"Content-Type": "application/json"}

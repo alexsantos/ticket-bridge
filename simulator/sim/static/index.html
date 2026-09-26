@@ -94,8 +94,8 @@
                     <input type="password" name="inbound_secret" autocomplete="off">
                 </label>
                 <p class="hint">
-                    Must match exactly what the bridge sends: its value prefix (e.g. "Bearer ")
-                    followed by the secret its <code>secret_ref</code> resolves to.
+                    Must match exactly what the bridge sends: the value prefix (e.g. "Bearer ")
+                    followed by the outbound secret set for this system in the bridge's Systems tab.
                 </p>
                 <label class="checkbox" id="clear-inbound-secret-field" hidden>
                     <input type="checkbox" name="clear_inbound_secret"> Clear stored header value

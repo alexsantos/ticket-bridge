@@ -25,7 +25,6 @@ from app.database import get_connection
 from app.services import outbox_service, secret_store
 from app.services.audit_service import record_audit
 from app.services.dispatcher import DeliveryError, deliver
-from app.services.secrets import resolve_secret
 
 logger = logging.getLogger(__name__)
 
@@ -89,13 +88,14 @@ async def run_sync_batch() -> dict:
 
 def resolve_outbound_secret(system: dict) -> str | None:
     """
-    The secret to send to `system`, or None if it has none configured.
+    The secret to send to `system`, or None if it has none.
 
-    A secret stored from the frontend (encrypted on the row) wins over
-    auth_config.secret_ref. If one is configured but can't be obtained,
-    this raises DeliveryError, so the entry is marked failed and retried -
-    rather than delivered without auth, which is what used to happen when
-    a secret_ref didn't resolve (see CLAUDE.md Decision 13).
+    The only source is the secret stored (encrypted) from the frontend. A
+    system still carrying an `auth_config.secret_ref` from before 0.8.0
+    (CLAUDE.md Decision 14) expected authentication that can no longer be
+    looked up, so it fails the delivery - marked failed, retried, reason in
+    the audit log - rather than being delivered without the header. The
+    same goes for a stored secret that can't be decrypted.
     """
     if system.get("outbound_secret_encrypted"):
         try:
@@ -103,16 +103,13 @@ def resolve_outbound_secret(system: dict) -> str | None:
         except secret_store.SecretStoreError as exc:
             raise DeliveryError(str(exc)) from exc
 
-    secret_ref = (system.get("auth_config") or {}).get("secret_ref")
-    if not secret_ref:
-        return None
-    value = resolve_secret(secret_ref)
-    if value is None:
+    if (system.get("auth_config") or {}).get("secret_ref"):
         raise DeliveryError(
-            f"Outbound secret_ref '{secret_ref}' could not be resolved (no {secret_ref.upper()} "
-            "environment variable, and not found in Secret Manager) - not delivering without auth."
+            "This system still uses a secret reference (secret_ref), which is no longer "
+            "supported - set its outbound secret in the Systems tab, or mark it as having "
+            "no secret. Not delivering without auth."
         )
-    return value
+    return None
 
 
 async def _get_system_config(conn, code: str) -> dict | None:

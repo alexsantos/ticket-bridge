@@ -195,8 +195,6 @@ async function loadSystems() {
 
 const systemDialog = document.getElementById("dialog-system");
 const systemForm = document.getElementById("form-system");
-const clearSecretField = document.getElementById("clear-secret-field");
-const clearSecretCheckbox = document.getElementById("clear-secret-checkbox");
 const clearOutboundSecretField = document.getElementById("clear-outbound-secret-field");
 const clearOutboundSecretCheckbox = document.getElementById("clear-outbound-secret-checkbox");
 const systemFormError = document.getElementById("system-form-error");
@@ -204,10 +202,6 @@ let codeBeingEdited = null;
 
 document.getElementById("btn-new-system").addEventListener("click", () => openSystemDialog(null));
 document.getElementById("btn-cancel-system").addEventListener("click", () => systemDialog.close());
-clearSecretCheckbox.addEventListener("change", () => {
-    systemForm.secret_ref.disabled = clearSecretCheckbox.checked;
-    if (clearSecretCheckbox.checked) systemForm.secret_ref.value = "";
-});
 clearOutboundSecretCheckbox.addEventListener("change", () => {
     systemForm.outbound_secret.disabled = clearOutboundSecretCheckbox.checked;
     if (clearOutboundSecretCheckbox.checked) systemForm.outbound_secret.value = "";
@@ -225,29 +219,22 @@ function openSystemDialog(system) {
         systemForm.active.checked = system.active;
         systemForm.auth_header.value = system.auth_header ?? "";
         systemForm.auth_value_prefix.value = system.auth_value_prefix ?? "";
-        // The secret_ref value itself is never returned by the API (see
-        // SystemOut), so this field always starts blank - only has_secret
-        // (whether one is configured at all) is known. Leaving it blank on
-        // Save keeps whatever secret_ref is already stored; type a new one
-        // to replace it, or check "Clear secret reference" to remove it.
-        systemForm.secret_ref.placeholder = system.has_secret
-            ? "•••••••• (a reference is configured - leave blank to keep it)"
-            : "e.g. system_c_outbound_key";
-        // Same for the stored (encrypted) outbound secret: only whether one
-        // exists is known, never its value.
-        systemForm.outbound_secret.placeholder = system.has_stored_secret
-            ? "•••••••• (stored - leave blank to keep it)"
-            : "not set";
-    } else {
-        systemForm.secret_ref.placeholder = "e.g. system_c_outbound_key";
-        systemForm.outbound_secret.placeholder = "not set";
     }
-    clearSecretCheckbox.checked = false;
-    systemForm.secret_ref.disabled = false;
-    clearSecretField.hidden = !system?.has_secret;
-    clearOutboundSecretCheckbox.checked = false;
+    // The outbound secret is never returned by the API - only whether one
+    // is stored (has_secret). Leaving the field blank on Save keeps it.
+    systemForm.outbound_secret.placeholder = system?.has_secret
+        ? "•••••••• (stored - leave blank to keep it)"
+        : "not set";
     systemForm.outbound_secret.disabled = false;
-    clearOutboundSecretField.hidden = !system?.has_stored_secret;
+    clearOutboundSecretCheckbox.checked = false;
+    // A pre-0.8.0 secret_ref can't be used any more: deliveries fail until
+    // the admin sets a secret or explicitly chooses none (which is what the
+    // checkbox then means).
+    const legacy = !!system?.has_legacy_secret_ref;
+    document.getElementById("legacy-secret-ref-warning").hidden = !legacy;
+    document.getElementById("clear-outbound-secret-label").textContent =
+        system?.has_secret ? "Remove stored secret" : "Send without a secret";
+    clearOutboundSecretField.hidden = !(system?.has_secret || legacy);
     systemFormError.hidden = true;
     renderSystemTopicsCheckboxes(system ? system.topics : []);
 
@@ -280,19 +267,12 @@ systemForm.addEventListener("submit", async (e) => {
 
     // Only include auth_config keys the admin actually typed a value for.
     // The backend merges (not replaces) auth_config on update, so omitting
-    // a key here leaves whatever is already stored untouched - critical for
-    // secret_ref, whose current value this form never sees (see SystemOut).
+    // a key here leaves whatever is already stored untouched.
     const authConfig = {};
     const authHeader = data.get("auth_header");
     if (authHeader) authConfig.header = authHeader;
     const authValuePrefix = data.get("auth_value_prefix");
     if (authValuePrefix) authConfig.value_prefix = authValuePrefix;
-    const secretRef = data.get("secret_ref");
-    if (codeBeingEdited && clearSecretCheckbox.checked) {
-        authConfig.secret_ref = null; // explicit clear - safe, see sync_service.py's .get()
-    } else if (secretRef) {
-        authConfig.secret_ref = secretRef;
-    }
 
     const body = {
         name: data.get("name"),
@@ -524,7 +504,7 @@ const refreshers = {
     audit: loadAudit,
 };
 
-document.querySelectorAll(".btn-refresh").forEach((btn) => {
+document.querySelectorAll(".btn-refresh[data-refresh]").forEach((btn) => {
     btn.addEventListener("click", async () => {
         btn.disabled = true;
         try {
@@ -533,6 +513,26 @@ document.querySelectorAll(".btn-refresh").forEach((btn) => {
             btn.disabled = false;
         }
     });
+});
+
+// Sync now: delivers pending outbox entries immediately (POST /api/v1/sync
+// accepts the admin session), then reloads the audit log to show results.
+document.getElementById("btn-sync-now").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const out = document.getElementById("sync-result");
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`${API_BASE}/sync`, { method: "POST" });
+        const result = await resp.json();
+        out.textContent = resp.ok
+            ? `Sync: ${result.processed} processed - ${result.success} delivered, ${result.failures} failed.`
+            : `Sync failed: ${result.detail ?? `HTTP ${resp.status}`}`;
+        out.className = resp.ok && result.failures === 0 ? "hint" : "hint warning";
+        out.hidden = false;
+        await loadAudit();
+    } finally {
+        btn.disabled = false;
+    }
 });
 
 // ---------------------------------------------------------------------------

@@ -5,14 +5,13 @@ Authentication of inbound calls:
 
   1. POST /api/v1/events - authenticated with a per-system API key
      (api_keys table), sent in the `X-API-Key` header.
-  2. POST /api/v1/sync - authenticated with a simple shared secret
-     (SCHEDULER_SHARED_SECRET), sent in the `X-Scheduler-Secret` header by
-     whoever manually triggers a sync run (ops, a script, or - in a Cloud
-     Run deployment without the in-process scheduler - Cloud Scheduler; in
-     production on Cloud Run, prefer its native OIDC instead, see
-     README.md "Sync endpoint security" section). This has nothing to do
-     with the in-process scheduler (app/scheduler.py), which calls the
-     same sync logic directly in-process and needs no authentication.
+  2. POST /api/v1/sync (manual sync trigger) - an admin session (as in 3),
+     or, only if SCHEDULER_SHARED_SECRET is configured, that secret in the
+     `X-Scheduler-Secret` header, for a caller that can't log in (Cloud
+     Scheduler on Cloud Run - see `authorize_sync` below). This has
+     nothing to do with the in-process scheduler (app/scheduler.py), which
+     calls the same sync logic directly in-process and needs no
+     authentication.
   3. Configuration/audit endpoints (/api/v1/systems, /api/v1/topics,
      /api/v1/conversations, /api/v1/audit) - authenticated with a human
      admin session: an httpOnly cookie validated against the `sessions`
@@ -22,7 +21,8 @@ Authentication of inbound calls:
 
 We never store API keys, session tokens, or passwords in plaintext - API
 keys and session tokens only as a SHA-256 hash, passwords only as a
-bcrypt hash.
+bcrypt hash. Outbound secrets (sent *by* the bridge, so they can't be
+hashed) are stored encrypted - see app/services/secret_store.py.
 """
 import hashlib
 import hmac
@@ -77,16 +77,24 @@ async def authenticate_system(x_api_key: str = Header(..., alias="X-API-Key")) -
     return row["system_code"]
 
 
-async def authenticate_scheduler(
-    x_scheduler_secret: str = Header(..., alias="X-Scheduler-Secret")
+async def authorize_sync(
+    x_scheduler_secret: str | None = Header(default=None, alias="X-Scheduler-Secret"),
+    session_token: str | None = Cookie(default=None, alias=get_settings().session_cookie_name),
 ) -> None:
-    """FastAPI dependency: validates Cloud Scheduler's shared secret."""
-    settings = get_settings()
-    if not hmac.compare_digest(x_scheduler_secret, settings.scheduler_shared_secret):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid scheduler secret.",
-        )
+    """
+    FastAPI dependency for POST /api/v1/sync: an admin session, or - only if
+    SCHEDULER_SHARED_SECRET is configured - that secret in
+    X-Scheduler-Secret (for an external scheduler that can't log in, e.g.
+    Cloud Scheduler on Cloud Run). With no secret configured the header is
+    never accepted, so an unset secret can't be matched by an empty or
+    default value. See CLAUDE.md Decision 14.
+    """
+    secret = get_settings().scheduler_shared_secret
+    if x_scheduler_secret is not None:
+        if secret and hmac.compare_digest(x_scheduler_secret, secret):
+            return
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid scheduler secret.")
+    await require_login(session_token)
 
 
 def hash_password(raw_password: str) -> str:

@@ -303,8 +303,9 @@ token, then use it) or HMAC request signing would need real new code in
 `dispatcher.py`, not a config change - no worse off than before this
 decision, since none of the three original options covered those either.
 
-**Amended by Decision 13**: the secret's value can now also be set from the
-frontend (stored encrypted), not only referenced via `secret_ref`.
+**Amended by Decisions 13-14**: the secret's value is now set from the
+frontend and stored encrypted; `secret_ref` was removed in 0.8.0. The
+header / value-prefix mechanism described here is unchanged.
 
 ## Decision 10 — Inbound API key lifecycle: an endpoint + a one-time reveal, not manual SQL
 
@@ -430,7 +431,8 @@ in practice, zero authentication of its own.
 **Scope, deliberately**: this protects the human admin surface only -
 `systems`/`topics`/`conversations`/`audit` routers, plus a client-side
 redirect for the static frontend. `POST /api/v1/events` (per-system API
-key) and `POST /api/v1/sync` (scheduler shared secret) are untouched -
+key) and `POST /api/v1/sync` (scheduler shared secret - since Decision 14
+it also accepts an admin session) are untouched -
 those already authenticate distinct, non-human callers correctly; folding
 them into admin sessions would conflate two different trust boundaries.
 
@@ -483,6 +485,10 @@ ignored - and since an unresolved secret meant "deliver without auth",
 destinations received unauthenticated calls with only a log line to
 show for it.
 
+*Partly superseded by Decision 14: `secret_ref` and the env-var/Secret
+Manager lookup below were removed in 0.8.0, and `has_stored_secret` became
+`has_secret`. The encryption design is unchanged.*
+
 **Decision made** (`migrations/006_stored_outbound_secrets.sql`,
 `app/services/secret_store.py`):
 
@@ -511,6 +517,50 @@ show for it.
   failed, retried, reason in the audit log) instead of sending it
   without the header. A system with no secret configured at all is
   still delivered to without auth, as before.
+
+## Decision 14 — Fewer credentials: one source per secret, nothing per-system in the environment
+
+**Problem closed**: after Decision 13 an admin faced six credential
+concepts - per-system inbound key, per-system outbound secret set in the
+UI *or* by `secret_ref` (env var *or* Secret Manager), the scheduler
+shared secret, the admin password, and the encryption key - and it wasn't
+obvious which ones a VM deployment actually needed. Two of them had no
+job left there: `secret_ref` duplicated the stored secret, and
+`SCHEDULER_SHARED_SECRET` guarded `/sync` for an external pinger the VM
+doesn't have - with a known default (`change-me-in-production`) when
+left unset.
+
+**Decision made** (0.8.0):
+
+- **The stored secret is the only outbound secret.** `secret_ref`,
+  `app/services/secrets.py` and the `google-cloud-secret-manager`
+  dependency are gone; the API rejects `auth_config.secret_ref` (and any
+  key other than `header`/`value_prefix`). On Cloud Run,
+  `SECRETS_ENCRYPTION_KEY` comes from Secret Manager through Cloud Run's
+  own `--set-secrets`, so the app never calls Secret Manager itself.
+- **Leftover references fail loudly, never silently.** Migration
+  `007_retire_secret_ref.sql` removes `secret_ref` only where a stored
+  secret already took precedence. Anywhere else it stays as a marker:
+  `resolve_outbound_secret` fails the delivery with an explanation, and
+  `SystemOut.has_legacy_secret_ref` makes the Systems dialog show a
+  warning, until an admin sets a secret or ticks "Send without a secret"
+  (either one drops the reference). Stripping them all in the migration
+  would have quietly switched those systems to unauthenticated delivery.
+- **`/sync` accepts an admin session** (`authorize_sync`), which is what
+  the new *Audit → Sync now* button and the example scripts use.
+  `SCHEDULER_SHARED_SECRET` is now optional with an empty default, and
+  when empty the `X-Scheduler-Secret` header is never accepted - so it
+  can't be matched by an empty or guessed value. It remains for Cloud
+  Scheduler on Cloud Run, the one caller that can't log in.
+
+**What stays, deliberately**: two credentials per system, one per
+direction, rather than one shared secret. They're created by different
+parties and stored differently for a reason - the inbound key is minted by
+the bridge and kept only as a hash (a database leak can't impersonate a
+system), while the outbound secret is chosen by the receiving system and
+must be recoverable to be sent (so it's encrypted). One value for both
+would let a leak on either side compromise both directions. README.md
+"Credentials at a glance" is the one-picture explanation of the result.
 
 ## What this skeleton assumes and leaves undecided
 

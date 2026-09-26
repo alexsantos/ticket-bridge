@@ -7,8 +7,8 @@ require_login that don't need a live database (the no-cookie -> 401 path).
 
 The DB-lookup branch of require_login, and the full login -> me -> logout
 round trip, need a real Postgres connection and are not covered here -
-this project has no DB-backed pytest tests (see tests/test_secrets.py,
-tests/test_dispatcher.py); see README.md's "Verifying auth locally"
+this project has no DB-backed pytest tests (see tests/test_dispatcher.py,
+tests/test_outbound_secrets.py); see README.md's "Verifying auth locally"
 checklist for that manual verification instead.
 
     pytest tests/test_auth_security.py -v
@@ -87,3 +87,48 @@ async def test_login_throttled_after_max_failed_attempts(monkeypatch):
 
     assert exc_info.value.status_code == 429
     assert exc_info.value.headers["Retry-After"] == str(get_settings().login_lockout_minutes * 60)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/sync authorization (authorize_sync) - CLAUDE.md Decision 14
+# ---------------------------------------------------------------------------
+def _scheduler_secret(monkeypatch, value: str):
+    from types import SimpleNamespace
+
+    import app.security as security
+    monkeypatch.setattr(security, "get_settings", lambda: SimpleNamespace(scheduler_shared_secret=value))
+
+
+@pytest.mark.asyncio
+async def test_sync_accepts_configured_scheduler_secret(monkeypatch):
+    from app.security import authorize_sync
+    _scheduler_secret(monkeypatch, "s3cret")
+
+    assert await authorize_sync(x_scheduler_secret="s3cret", session_token=None) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured, presented", [
+    ("s3cret", "wrong"),
+    ("", ""),                          # unset secret must not be matchable by an empty header...
+    ("", "change-me-in-production"),   # ...nor by the old default value
+])
+async def test_sync_rejects_bad_or_unconfigured_scheduler_secret(monkeypatch, configured, presented):
+    from app.security import authorize_sync
+    _scheduler_secret(monkeypatch, configured)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await authorize_sync(x_scheduler_secret=presented, session_token=None)
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_sync_without_header_requires_admin_session(monkeypatch):
+    """No header -> falls through to require_login, which rejects a missing cookie before touching the DB."""
+    from app.security import authorize_sync
+    _scheduler_secret(monkeypatch, "s3cret")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await authorize_sync(x_scheduler_secret=None, session_token=None)
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Not authenticated."

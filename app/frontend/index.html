@@ -76,33 +76,33 @@
                     <label>Base URL (system's webhook endpoint)
                         <input type="url" name="base_url" required placeholder="https://.../webhook">
                     </label>
-                    <label>Auth header name (optional - defaults to X-API-Key)
-                        <input type="text" name="auth_header" placeholder="e.g. X-API-Key or Authorization">
-                    </label>
-                    <label>Auth value prefix (optional - e.g. "Bearer " with a trailing space, for a standard bearer token)
-                        <input type="text" name="auth_value_prefix" placeholder="e.g. Bearer ">
-                    </label>
-                    <label>Outbound secret (the value sent in the header above - stored encrypted, never shown again)
-                        <input type="password" name="outbound_secret" autocomplete="new-password">
-                    </label>
-                    <div id="clear-outbound-secret-field" hidden>
-                        <label class="checkbox">
-                            <input type="checkbox" id="clear-outbound-secret-checkbox"> Remove stored secret
+                    <fieldset class="auth-fieldset">
+                        <legend>Bridge → this system (how the bridge authenticates to its Base URL)</legend>
+                        <p id="legacy-secret-ref-warning" class="hint warning" hidden>
+                            This system still uses a secret reference from an older version, which is no
+                            longer supported: deliveries to it fail until you set its secret below, or tick
+                            "Send without a secret" if it doesn't need one.
+                        </p>
+                        <label>Header name (optional - defaults to X-API-Key)
+                            <input type="text" name="auth_header" placeholder="e.g. X-API-Key or Authorization">
                         </label>
-                    </div>
-                    <label>Or: secret reference (advanced - the name of an env var or Secret Manager secret on the host)
-                        <input type="text" name="secret_ref" placeholder="e.g. system_c_outbound_key">
-                    </label>
-                    <div id="clear-secret-field" hidden>
-                        <label class="checkbox">
-                            <input type="checkbox" id="clear-secret-checkbox"> Clear secret reference
+                        <label>Value prefix (optional - e.g. "Bearer " with a trailing space, for a standard bearer token)
+                            <input type="text" name="auth_value_prefix" placeholder="e.g. Bearer ">
                         </label>
-                    </div>
-                    <p class="hint">
-                        If both are set, the stored secret is used. If a configured secret can't be
-                        found at delivery time, the delivery fails (and is retried) rather than
-                        being sent without auth.
-                    </p>
+                        <label>Secret (the value this system expects in that header - stored encrypted, never shown again)
+                            <input type="password" name="outbound_secret" autocomplete="new-password">
+                        </label>
+                        <div id="clear-outbound-secret-field" hidden>
+                            <label class="checkbox">
+                                <input type="checkbox" id="clear-outbound-secret-checkbox"> <span id="clear-outbound-secret-label">Remove stored secret</span>
+                            </label>
+                        </div>
+                        <p class="hint">
+                            Leave the secret empty if this system doesn't check who calls it. If a stored
+                            secret can't be decrypted, deliveries fail (and are retried) rather than being
+                            sent without it.
+                        </p>
+                    </fieldset>
                     <p class="hint">
                         Status vocabulary and payload shape are fixed by the bridge for every
                         system - see the "Integration contract" section in README.md. There's
@@ -125,9 +125,9 @@
                 <!-- Only shown when editing an existing system - a new
                      system has no code to attach keys to until saved. -->
                 <div id="system-api-keys-section" class="dialog-section" hidden>
-                    <h4>Inbound API keys</h4>
+                    <h4>This system → bridge: inbound API keys</h4>
                     <p class="hint">
-                        Sent as <code>X-API-Key</code> on <code>POST /api/v1/events</code>.
+                        What this system sends as <code>X-API-Key</code> on <code>POST /api/v1/events</code>.
                         A key's value is shown only once, right after it's generated -
                         only its hash is stored, so it can never be retrieved again.
                     </p>
@@ -246,8 +246,10 @@
                         </select>
                     </label>
                     <button type="button" class="btn-refresh" data-refresh="audit" title="Reload this section's data">↻ Refresh</button>
+                    <button type="button" id="btn-sync-now" class="btn-refresh" title="Deliver pending outbox entries now instead of waiting for the scheduler">⇪ Sync now</button>
                 </div>
             </div>
+            <p id="sync-result" class="hint" aria-live="polite" hidden></p>
             <table id="table-audit">
                 <thead>
                     <tr>

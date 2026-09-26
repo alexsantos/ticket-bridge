@@ -25,7 +25,6 @@ RECEIVER_PORT="${RECEIVER_PORT:-9000}"
 if [ -f ../.env ]; then
   set -a; source ../.env; set +a
 fi
-: "${SCHEDULER_SHARED_SECRET:?Set SCHEDULER_SHARED_SECRET (e.g. via .env) before running this script.}"
 
 json() { python3 -m json.tool; }
 field() { python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
@@ -68,7 +67,7 @@ echo "$RESPONSE" | json
 
 echo
 echo "==> Triggering sync now - watch for the real payload printed below by the mock receiver"
-curl -s -X POST "$BASE_URL/api/v1/sync" -H "X-Scheduler-Secret: $SCHEDULER_SHARED_SECRET" | json
+admin_curl -X POST "$BASE_URL/api/v1/sync" | json
 
 sleep 1
 echo

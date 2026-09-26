@@ -79,9 +79,9 @@ Every setting can also be seeded from the environment on first start
 saved from the Config page, the saved value wins.
 
 **Webhook authentication (optional)**: if the bridge is configured to send
-a secret to this system (its `auth_config`: header, value prefix,
-`secret_ref` - CLAUDE.md Decision 9), set the same header name and the
-exact value it sends (prefix included, e.g. `Bearer abc123`). Deliveries
+a secret to this system (the "Bridge → this system" group in its Systems
+dialog: header name, value prefix, secret), set the same header name and
+the exact value it sends (prefix included, e.g. `Bearer abc123`). Deliveries
 that don't match get a 401, which shows up in the bridge's audit log as a
 delivery failure - handy for testing that config. Leave it empty to accept
 every delivery.

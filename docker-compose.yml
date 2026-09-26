@@ -8,7 +8,8 @@
 # *.sql file there, in filename order, on first startup against an empty
 # data volume. That order (001_initial_schema, 002_seed_example,
 # 003_standardize_ticket_status, 004_unify_auth_mechanism,
-# 005_admin_authentication, 006_stored_outbound_secrets) is exactly the
+# 005_admin_authentication, 006_stored_outbound_secrets,
+# 007_retire_secret_ref) is exactly the
 # sequence README.md section 3.2
 # has you run by hand, so `docker compose up` reproduces it automatically
 # - seed data (002) included, since this is a local/dev stack (005's
@@ -29,7 +30,7 @@
 #
 # `app` reads its configuration from `.env` (`env_file:` below) - the same
 # file local dev uses (README.md section 3.2 step 5: `cp .env.example
-# .env`), so there's exactly one place to set SCHEDULER_SHARED_SECRET,
+# .env`), so there's exactly one place to set SECRETS_ENCRYPTION_KEY,
 # ROOT_PATH, etc. regardless of how you run this. The one exception is
 # DATABASE_URL, overridden below on purpose: .env's copy points at
 # `localhost`, correct for a Postgres running directly on the host, but

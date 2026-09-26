@@ -10,18 +10,7 @@ for local development.
 """
 from functools import lru_cache
 
-from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# pydantic-settings' own `env_file` support (below) only populates this
-# class's declared fields - it does not write into the real process
-# os.environ. Anything that reads os.environ directly (e.g.
-# app/services/secrets.py's local-mode secret_ref lookup, which needs to
-# work for arbitrary per-system secret names that aren't declared Settings
-# fields) would otherwise never see a value that only exists in .env.
-# override=False (the default) means a real env var - a container's -e
-# flag, a CI secret - always wins over .env.
-load_dotenv()
 
 
 class Settings(BaseSettings):
@@ -55,11 +44,13 @@ class Settings(BaseSettings):
     # Timeout (seconds) for outbound HTTP calls to each external system.
     outbound_timeout_seconds: float = 10.0
 
-    # Shared secret required to call POST /api/v1/sync manually (simple
-    # protection against unauthenticated external invocation). Unrelated
-    # to the internal scheduler above, which calls the same logic directly
-    # in-process and needs no authentication.
-    scheduler_shared_secret: str = "change-me-in-production"
+    # Optional. POST /api/v1/sync (manual trigger) accepts an admin session;
+    # set this only for a non-human caller that can't log in - e.g. Cloud
+    # Scheduler on Cloud Run, sent as X-Scheduler-Secret. Empty (the
+    # default) disables that header entirely: there is no default value to
+    # guess. The in-process scheduler above needs none of this - it calls
+    # the same logic directly. See CLAUDE.md Decision 14.
+    scheduler_shared_secret: str = ""
 
     # Admin frontend session cookie (see app/api/auth.py, app/security.py's
     # require_login). Distinct from SCHEDULER_SHARED_SECRET / api_keys -
@@ -77,8 +68,8 @@ class Settings(BaseSettings):
 
     # Key for encrypting outbound secrets entered in the frontend
     # (systems.outbound_secret_encrypted - see app/services/secret_store.py,
-    # CLAUDE.md Decision 13). Empty means the frontend can't store secrets;
-    # auth_config.secret_ref still works.
+    # CLAUDE.md Decisions 13-14). Empty means outbound secrets can't be
+    # stored, so no system can be given one.
     secrets_encryption_key: str = ""
 
     # Log level.

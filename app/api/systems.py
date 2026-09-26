@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Dep
 # returned as-is (see SystemOut).
 _SELECT_SYSTEM_COLUMNS = """
     s.code, s.name, s.base_url, s.active, s.auth_config,
-    s.outbound_secret_encrypted IS NOT NULL AS has_stored_secret,
+    s.outbound_secret_encrypted IS NOT NULL AS has_secret,
     s.created_at, s.updated_at,
     COALESCE(
         (SELECT array_agg(topic_code ORDER BY topic_code)
@@ -57,7 +57,7 @@ def _row_to_system_out(row: dict) -> SystemOut:
         **row,
         auth_header=auth_config.get("header"),
         auth_value_prefix=auth_config.get("value_prefix"),
-        has_secret=bool(auth_config.get("secret_ref")),
+        has_legacy_secret_ref=bool(auth_config.get("secret_ref")),
     )
 
 
@@ -140,6 +140,10 @@ async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
         raw_updates["outbound_secret_encrypted"] = _encrypt_outbound_secret(outbound_secret)
     elif clear_outbound_secret:
         raw_updates["outbound_secret_encrypted"] = None
+    # Deciding the secret either way (setting one, or explicitly none) also
+    # retires a pre-0.8.0 secret_ref, which would otherwise keep failing
+    # deliveries (sync_service.resolve_outbound_secret).
+    drop_legacy_secret_ref = "outbound_secret_encrypted" in raw_updates
     if not raw_updates:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
@@ -156,15 +160,18 @@ async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
                 if column_updates:
                     # auth_config is merged (jsonb ||), not replaced: the frontend only
                     # ever sends the auth_config keys the admin actually typed a new
-                    # value for (see app.js) - a shallow replace would silently wipe
-                    # out, e.g., an existing secret_ref whenever only the header or
-                    # value_prefix was being changed, since SystemOut never returns
-                    # secret_ref for the frontend to send back unchanged.
+                    # value for (see app.js), so changing only the header must not
+                    # wipe out a stored value_prefix, and vice versa.
+                    base_auth = "COALESCE(auth_config, '{}'::jsonb)" + (
+                        " - 'secret_ref'" if drop_legacy_secret_ref else ""
+                    )
                     set_parts = [
-                        "auth_config = COALESCE(auth_config, '{}'::jsonb) || %(auth_config)s::jsonb"
+                        f"auth_config = ({base_auth}) || %(auth_config)s::jsonb"
                         if field == "auth_config" else f"{field} = %({field})s"
                         for field in column_updates
                     ]
+                    if drop_legacy_secret_ref and "auth_config" not in column_updates:
+                        set_parts.append(f"auth_config = {base_auth}")
                     set_clause = ", ".join(set_parts)
                     await cur.execute(
                         f"UPDATE systems SET {set_clause} WHERE code = %(code)s RETURNING code",

@@ -12,7 +12,6 @@ dependencies = [
     "python-dotenv==1.2.2",
     "psycopg[binary,pool]==3.3.4",
     "httpx==0.28.1",
-    "google-cloud-secret-manager==2.29.0",
     "python-multipart==0.0.32",
     "apscheduler==3.11.3",
     "bcrypt==5.0.0",

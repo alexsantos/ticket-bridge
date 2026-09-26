@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class CanonicalStatus(StrEnum):
@@ -135,15 +135,33 @@ class SyncResult(BaseModel):
 # ---------------------------------------------------------------------------
 # System configuration (CRUD /api/v1/systems)
 # ---------------------------------------------------------------------------
+AUTH_CONFIG_KEYS = {"header", "value_prefix"}
+
+
+def _check_auth_config(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """auth_config only says *how* the secret is sent; the secret itself is outbound_secret."""
+    if value is None:
+        return value
+    if "secret_ref" in value:
+        raise ValueError(
+            "auth_config.secret_ref is no longer supported - send the secret itself as "
+            "outbound_secret (stored encrypted). See CLAUDE.md Decision 14."
+        )
+    unknown = set(value) - AUTH_CONFIG_KEYS
+    if unknown:
+        raise ValueError(f"Unknown auth_config keys: {sorted(unknown)} (allowed: {sorted(AUTH_CONFIG_KEYS)}).")
+    return value
+
+
 class SystemCreate(BaseModel):
     code: str
     name: str
     base_url: str
     auth_config: dict[str, Any] = Field(
         default_factory=dict,
-        description="Outbound auth: optional 'header' (default 'X-API-Key'), optional "
-                    "'value_prefix' (e.g. 'Bearer ', for a standard bearer token), and "
-                    "'secret_ref'. See CLAUDE.md Decision 9.",
+        description="How the outbound secret is sent: optional 'header' (default "
+                    "'X-API-Key') and optional 'value_prefix' (e.g. 'Bearer ', for a "
+                    "standard bearer token). See CLAUDE.md Decision 9.",
     )
     active: bool = True
     topics: list[str] = Field(
@@ -151,10 +169,11 @@ class SystemCreate(BaseModel):
     )
     outbound_secret: str | None = Field(
         default=None,
-        description="Outbound secret value, stored encrypted and never returned - an "
-                    "alternative to auth_config.secret_ref that needs no host access. "
-                    "Takes precedence over secret_ref. See CLAUDE.md Decision 13.",
+        description="The secret the bridge sends to this system, in auth_config's header. "
+                    "Stored encrypted, never returned. See CLAUDE.md Decisions 13-14.",
     )
+
+    _auth_config_keys = field_validator("auth_config")(_check_auth_config)
 
 
 class SystemUpdate(BaseModel):
@@ -167,8 +186,10 @@ class SystemUpdate(BaseModel):
         default=None, description="Replaces the stored outbound secret (see SystemCreate)."
     )
     clear_outbound_secret: bool = Field(
-        default=False, description="Removes the stored outbound secret."
+        default=False, description="Removes the stored outbound secret (the system then gets no auth header)."
     )
+
+    _auth_config_keys = field_validator("auth_config")(_check_auth_config)
 
 
 class SystemOut(BaseModel):
@@ -187,17 +208,15 @@ class SystemOut(BaseModel):
     )
     has_secret: bool = Field(
         default=False,
-        description="Whether an outbound secret_ref is configured. The reference itself, "
-                    "and the secret it resolves to, are never returned by this API.",
+        description="Whether an outbound secret is stored (encrypted). The secret itself "
+                    "is never returned by this API.",
     )
-    has_stored_secret: bool = Field(
+    has_legacy_secret_ref: bool = Field(
         default=False,
-        description="Whether an outbound secret was set via the API/frontend (stored "
-                    "encrypted, never returned). Takes precedence over secret_ref.",
+        description="The system still has an auth_config.secret_ref from before 0.8.0, "
+                    "so its deliveries fail until an outbound secret is set (or it's "
+                    "marked as having none). See CLAUDE.md Decision 14.",
     )
-    # auth_config.secret_ref intentionally never returned by the API - unlike
-    # header/value_prefix it names where a secret lives, and the frontend has
-    # no legitimate need to display it back.
 
 
 # ---------------------------------------------------------------------------

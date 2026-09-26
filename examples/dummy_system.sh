@@ -17,7 +17,7 @@
 #   ./dummy_system.sh reply <conversation_id> <status> [note]
 #                                                post an update as the dummy
 #   ./dummy_system.sh sync                       trigger delivery now instead of waiting
-#                                                for the scheduler (needs SCHEDULER_SHARED_SECRET)
+#                                                for the scheduler (needs admin credentials)
 #   ./dummy_system.sh teardown                   deactivate the dummy, drop its topics,
 #                                                revoke its API keys
 #
@@ -36,7 +36,7 @@
 #                      e.g. METADATA='{"insurance_number": "INS-1"}' ./dummy_system.sh reply ...
 #   COMPOSE_DIR        directory holding docker-compose.yml, for --compose (default ..)
 #   COMPOSE_SERVICE    the bridge's compose service name (default app)
-#   ADMIN_USERNAME / ADMIN_PASSWORD   for setup/teardown - see _admin_session.sh
+#   ADMIN_USERNAME / ADMIN_PASSWORD   for setup/sync/teardown - see _admin_session.sh
 #
 # State (the dummy's API key, and which external_ref it used for each
 # conversation) lives in examples/.dummy-<code>.* - gitignored, removed by
@@ -211,8 +211,9 @@ cmd_reply() {
 }
 
 cmd_sync() {
-  : "${SCHEDULER_SHARED_SECRET:?Set SCHEDULER_SHARED_SECRET (e.g. via ../.env) to trigger sync manually.}"
-  curl -s -X POST "$BASE_URL/api/v1/sync" -H "X-Scheduler-Secret: $SCHEDULER_SHARED_SECRET" | pretty
+  admin_login
+  trap admin_logout EXIT
+  request POST "$BASE_URL/api/v1/sync" | pretty
 }
 
 cmd_teardown() {

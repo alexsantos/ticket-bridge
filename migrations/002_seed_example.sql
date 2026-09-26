@@ -27,20 +27,24 @@ VALUES
         || 'note (string, free-text human comment, optional on every event) and '
         || 'insurance_number (string, set by system_b when resolving a coverage verification case).');
 
+-- No outbound secrets are seeded: they're stored encrypted with each
+-- deployment's own SECRETS_ENCRYPTION_KEY, which plain SQL can't produce.
+-- Set one from the Systems tab if a demo needs the header (CLAUDE.md
+-- Decision 14).
 INSERT INTO systems (code, name, base_url, auth_config, active)
 VALUES
 (
     'system_a',
     'Clinical Team ServiceDesk (example)',
     'https://system-a.example.local/api/tickets/webhook',
-    '{"header": "X-API-Key", "secret_ref": "system_a_outbound_key"}',
+    '{"header": "X-API-Key"}',
     TRUE
 ),
 (
     'system_b',
     'Patient Registration & Insurance (example)',
     'https://system-b.example.local/api/v2/patient-cases/hook',
-    '{"header": "Authorization", "value_prefix": "Bearer ", "secret_ref": "system_b_outbound_token"}',
+    '{"header": "Authorization", "value_prefix": "Bearer "}',
     TRUE
 );
 

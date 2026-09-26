@@ -38,7 +38,7 @@ async def test_default_header_is_x_api_key_with_no_prefix(monkeypatch):
 
     await deliver(
         base_url="https://destination.example/webhook",
-        auth_config={"secret_ref": "whatever"},
+        auth_config={},
         payload={"hello": "world"},
         resolved_secret="my-api-key-value",
     )
@@ -60,7 +60,7 @@ async def test_custom_header_with_value_prefix(monkeypatch):
 
     await deliver(
         base_url="https://destination.example/webhook",
-        auth_config={"header": "Authorization", "value_prefix": "Bearer ", "secret_ref": "whatever"},
+        auth_config={"header": "Authorization", "value_prefix": "Bearer "},
         payload={"hello": "world"},
         resolved_secret="my-bearer-token",
     )

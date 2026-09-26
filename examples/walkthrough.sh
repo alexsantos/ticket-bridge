@@ -15,9 +15,10 @@
 # delivery happen, run live_delivery_demo.sh instead.
 #
 # Prerequisites: app running locally with 001+002+003 migrations applied
-# (see README.md section 3). The final conversation/audit lookups need an
-# admin session: set ADMIN_PASSWORD (and ADMIN_USERNAME if not "admin"),
-# or you'll be prompted - see _admin_session.sh.
+# (see README.md section 3). The sync triggers and the final
+# conversation/audit lookups need an admin session: set ADMIN_PASSWORD (and
+# ADMIN_USERNAME if not "admin"), or you'll be prompted - see
+# _admin_session.sh.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -27,7 +28,6 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 if [ -f ../.env ]; then
   set -a; source ../.env; set +a
 fi
-: "${SCHEDULER_SHARED_SECRET:?Set SCHEDULER_SHARED_SECRET (e.g. via .env) before running this script.}"
 
 json() { python3 -m json.tool; }
 field() { python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
@@ -58,7 +58,7 @@ echo "       {\"event\": \"ticket.created\", \"conversation_id\": \"$CONVERSATIO
 echo
 
 echo "### 2. Trigger sync (the in-process scheduler would do this automatically within SYNC_INTERVAL_SECONDS)"
-curl -s -X POST "$BASE_URL/api/v1/sync" -H "X-Scheduler-Secret: $SCHEDULER_SHARED_SECRET" | json
+admin_curl -X POST "$BASE_URL/api/v1/sync" | json
 echo "    -> delivery to system_b's example.local URL fails (it's fictional) -"
 echo "       run live_delivery_demo.sh to watch a real delivery instead."
 echo
@@ -115,7 +115,7 @@ echo "       {\"event\": \"ticket.updated\", \"conversation_id\": \"$CONVERSATIO
 echo
 
 echo "### 6. Trigger sync again and inspect the final state"
-curl -s -X POST "$BASE_URL/api/v1/sync" -H "X-Scheduler-Secret: $SCHEDULER_SHARED_SECRET" | json
+admin_curl -X POST "$BASE_URL/api/v1/sync" | json
 echo
 echo "### Conversation state:"
 admin_curl "$BASE_URL/api/v1/conversations/$CONVERSATION_ID" | json

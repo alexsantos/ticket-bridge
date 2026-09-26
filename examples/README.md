@@ -46,10 +46,9 @@ Two ways to run it:
 
 Both scripts assume the app is running locally (`uv run uvicorn
 app.main:app --reload --port 8080`, see README.md section 3) with the
-migrations applied (002's seed data included), and read
-`SCHEDULER_SHARED_SECRET` from `../.env` if present. Both also call admin
-endpoints (`/systems`, `/conversations`, `/audit`), which need an admin
-session since 0.6.0: set `ADMIN_PASSWORD` (and `ADMIN_USERNAME` if it
+migrations applied (002's seed data included). Both call admin
+endpoints (`/systems`, `/sync`, `/conversations`, `/audit`), which need an
+admin session: set `ADMIN_PASSWORD` (and `ADMIN_USERNAME` if it
 isn't `admin`), or you'll be prompted for it (`_admin_session.sh` handles
 the login and logs out when the script exits). `BASE_URL` overrides the
 default `http://localhost:8080`.
@@ -94,8 +93,8 @@ METADATA='{"insurance_number": "INS-2298104"}' \
 Every reply to the same conversation reuses the dummy's own ticket ref,
 so the real system sees updates to one ticket, not a new one each time.
 `./examples/dummy_system.sh sync` delivers immediately instead of waiting
-for the scheduler (needs `SCHEDULER_SHARED_SECRET`). `setup` and
-`teardown` need admin credentials, like the scripts above; `open` and
+for the scheduler. `setup`, `sync` and `teardown` need admin credentials,
+like the scripts above; `open` and
 `reply` only use the dummy's own API key. Leave `teardown` for the end:
 while the dummy stays active and subscribed, it receives fan-out for
 every ticket on its topics.
@@ -274,12 +273,18 @@ commentary, if any, ride along with it.
 
 ### 5. Trigger sync and inspect the result
 
-```bash
-curl -X POST http://localhost:8080/api/v1/sync \
-  -H "X-Scheduler-Secret: <your SCHEDULER_SHARED_SECRET>"
+In the admin panel: **Audit → ⇪ Sync now**, then look at the Conversations
+and Audit tabs. Or with curl, logged in as an admin (the session cookie
+goes in a cookie jar):
 
-curl http://localhost:8080/api/v1/conversations/<conversation_id>
-curl "http://localhost:8080/api/v1/audit?conversation_id=<conversation_id>"
+```bash
+curl -c /tmp/tb-cookies -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "<your admin password>"}'
+
+curl -b /tmp/tb-cookies -X POST http://localhost:8080/api/v1/sync
+curl -b /tmp/tb-cookies http://localhost:8080/api/v1/conversations/<conversation_id>
+curl -b /tmp/tb-cookies "http://localhost:8080/api/v1/audit?conversation_id=<conversation_id>"
 ```
 
 If you have direct database access, the raw enqueued payloads (ground

@@ -183,6 +183,11 @@ fieldset {
 }
 fieldset legend { font-size: 0.85rem; color: #4b5563; padding: 0 0.3rem; }
 
+/* System dialog: the "Bridge -> this system" auth group. */
+.auth-fieldset { display: flex; flex-direction: column; gap: 0.8rem; }
+.auth-fieldset .hint { margin: 0; }
+#sync-result { margin: -0.4rem 0 0.8rem; }
+
 #system-topics-checkboxes {
     display: flex;
     flex-wrap: wrap;
