@@ -224,7 +224,8 @@ ticket-bridge/
 │   ├── 002_seed_example.sql                # sample systems, topics, subscriptions (development only)
 │   ├── 003_standardize_ticket_status.sql   # drops per-system status_mapping/payload_template, adds CHECK constraints
 │   ├── 004_unify_auth_mechanism.sql        # drops auth_type - one generic header-based auth mechanism
-│   └── 005_admin_authentication.sql        # users/sessions tables + seeded default admin
+│   ├── 005_admin_authentication.sql        # users/sessions tables + seeded default admin
+│   └── 006_stored_outbound_secrets.sql     # encrypted outbound secret column on systems
 ├── tests/
 │   └── test_payload_builder.py
 ├── examples/
@@ -278,6 +279,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/002_seed_example.sql   
 psql "postgresql://localhost/ticketbridge" -f migrations/003_standardize_ticket_status.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/004_unify_auth_mechanism.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/005_admin_authentication.sql  # seeds the default admin - see section 5
+psql "postgresql://localhost/ticketbridge" -f migrations/006_stored_outbound_secrets.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -414,13 +416,13 @@ Scheduler, no cron, nothing external to configure. The rest of this
 section (4) is GCP/Cloud Run-specific and can be skipped entirely for this
 deployment mode.
 
-> **Secrets outside GCP**: `secrets.py` currently only knows two modes -
-> `ENVIRONMENT=local` reads each `secret_ref` from an environment variable
-> of the same name (as used above), anything else assumes GCP Secret
-> Manager is available. There's no generic "production, but not GCP" mode
-> yet, so a non-GCP VM should keep `ENVIRONMENT=local` (despite the name)
-> to get env-var-based secrets - or extend `secrets.py` with a real third
-> backend if that naming bothers you enough to fix it.
+> **Secrets outside GCP**: a `secret_ref` is always looked up as an
+> environment variable first (as used above), whatever `ENVIRONMENT` is
+> set to, and only then in Secret Manager (if `GOOGLE_CLOUD_PROJECT` is
+> set) - so a VM can run with `ENVIRONMENT=production` (HTTPS-only session
+> cookie) and still use `.env` secrets. Or skip env vars entirely and set
+> each system's secret from the frontend - see "Outbound secrets" in
+> section 4.7.
 
 ### 3.6. Running with Docker Compose
 
@@ -607,6 +609,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/004_unify_auth_mechanism.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/005_admin_authentication.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/006_stored_outbound_secrets.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
@@ -751,7 +755,8 @@ not a choice of types: if a system's `auth_config` has a `secret_ref`,
 the resolved secret is placed into a header — `auth_config.header`
 (defaults to `X-API-Key`), optionally prefixed with
 `auth_config.value_prefix`. The "Auth header name" / "Auth value prefix" /
-"Secret reference" fields on the Systems tab map directly onto this.
+"Outbound secret" / "Secret reference" fields on the Systems tab map
+directly onto this.
 Common patterns:
 
 | Pattern | Header name | Value prefix |
@@ -759,6 +764,27 @@ Common patterns:
 | Custom API key header (default) | *(leave blank → `X-API-Key`)* | *(leave blank)* |
 | Standard bearer token | `Authorization` | `Bearer ` (with a trailing space) |
 | Some other custom scheme | whatever the destination expects | whatever prefix it expects, if any |
+
+**Outbound secrets** — a system's secret can come from either of two
+places (CLAUDE.md Decision 13):
+
+- **Set in the frontend** ("Outbound secret" in the system's dialog, or
+  `outbound_secret` on `POST`/`PATCH /api/v1/systems`): stored encrypted
+  in the database and never returned by the API — no shell access to the
+  host needed to set or rotate it. Needs `SECRETS_ENCRYPTION_KEY` set once
+  in the environment (see `.env.example` for how to generate one); without
+  it, saving a secret is refused with an explicit error rather than
+  stored in plaintext. Keep the key: if it changes, stored secrets can't
+  be decrypted and must be re-entered (deliveries fail with a message
+  saying so, rather than going out without auth).
+- **By reference** (`auth_config.secret_ref`, "Secret reference" in the
+  dialog): the name of an environment variable (`secret_ref.upper()`) or a
+  Secret Manager secret on the host.
+
+If both are set, the stored secret wins. If a configured secret can't be
+found or decrypted at delivery time, the delivery is marked failed (and
+retried) with the reason in the audit log — it is never sent without
+the header.
 
 There's no built-in HTTP Basic Auth support — it needs a real
 `base64(username:password)` encoding step this project doesn't implement

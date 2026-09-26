@@ -82,18 +82,27 @@
                     <label>Auth value prefix (optional - e.g. "Bearer " with a trailing space, for a standard bearer token)
                         <input type="text" name="auth_value_prefix" placeholder="e.g. Bearer ">
                     </label>
-                    <label>Secret reference (name in Secret Manager / env var)
+                    <label>Outbound secret (the value sent in the header above - stored encrypted, never shown again)
+                        <input type="password" name="outbound_secret" autocomplete="new-password">
+                    </label>
+                    <div id="clear-outbound-secret-field" hidden>
+                        <label class="checkbox">
+                            <input type="checkbox" id="clear-outbound-secret-checkbox"> Remove stored secret
+                        </label>
+                    </div>
+                    <label>Or: secret reference (advanced - the name of an env var or Secret Manager secret on the host)
                         <input type="text" name="secret_ref" placeholder="e.g. system_c_outbound_key">
                     </label>
                     <div id="clear-secret-field" hidden>
                         <label class="checkbox">
-                            <input type="checkbox" id="clear-secret-checkbox"> Clear stored secret
+                            <input type="checkbox" id="clear-secret-checkbox"> Clear secret reference
                         </label>
-                        <p class="hint">
-                            Removes the configured secret reference entirely (back to "no secret").
-                            Disables the field above while checked.
-                        </p>
                     </div>
+                    <p class="hint">
+                        If both are set, the stored secret is used. If a configured secret can't be
+                        found at delivery time, the delivery fails (and is retried) rather than
+                        being sent without auth.
+                    </p>
                     <p class="hint">
                         Status vocabulary and payload shape are fixed by the bridge for every
                         system - see the "Integration contract" section in README.md. There's
@@ -106,6 +115,7 @@
                     <label class="checkbox">
                         <input type="checkbox" name="active" checked> Active
                     </label>
+                    <p id="system-form-error" class="hint warning" hidden></p>
                     <div class="dialog-actions">
                         <button type="button" id="btn-cancel-system">Cancel</button>
                         <button type="submit" class="btn-primary">Save</button>

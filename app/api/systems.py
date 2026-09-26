@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.database import get_connection
 from app.schemas import ApiKeyCreate, ApiKeyCreated, ApiKeyOut, SystemCreate, SystemOut, SystemUpdate
 from app.security import generate_api_key, require_login
+from app.services import secret_store
 from app.services.audit_service import record_audit
 
 router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Depends(require_login)])
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Dep
 # returned as-is (see SystemOut).
 _SELECT_SYSTEM_COLUMNS = """
     s.code, s.name, s.base_url, s.active, s.auth_config,
+    s.outbound_secret_encrypted IS NOT NULL AS has_stored_secret,
     s.created_at, s.updated_at,
     COALESCE(
         (SELECT array_agg(topic_code ORDER BY topic_code)
@@ -38,6 +40,14 @@ _SELECT_SYSTEM_COLUMNS = """
         ARRAY[]::text[]
     ) AS topics
 """
+
+
+def _encrypt_outbound_secret(value: str) -> str:
+    """400 with a readable reason if encryption isn't configured - never stores plaintext."""
+    try:
+        return secret_store.encrypt(value)
+    except secret_store.SecretStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _row_to_system_out(row: dict) -> SystemOut:
@@ -70,6 +80,10 @@ async def get_system(code: str) -> SystemOut:
 
 @router.post("", response_model=SystemOut, status_code=201)
 async def create_system(payload: SystemCreate) -> SystemOut:
+    values = payload.model_dump(mode="json", exclude={"outbound_secret"})
+    values["outbound_secret_encrypted"] = (
+        _encrypt_outbound_secret(payload.outbound_secret) if payload.outbound_secret else None
+    )
     async with get_connection() as conn:
         async with conn.transaction():
             async with conn.cursor() as cur:
@@ -77,11 +91,12 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                     await cur.execute(
                         """
                         INSERT INTO systems
-                            (code, name, base_url, auth_config, active)
+                            (code, name, base_url, auth_config, active, outbound_secret_encrypted)
                         VALUES
-                            (%(code)s, %(name)s, %(base_url)s, %(auth_config)s, %(active)s)
+                            (%(code)s, %(name)s, %(base_url)s, %(auth_config)s, %(active)s,
+                             %(outbound_secret_encrypted)s)
                         """,
-                        payload.model_dump(mode="json"),
+                        values,
                     )
                     if payload.topics:
                         await cur.execute(
@@ -104,7 +119,10 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                 conn,
                 system_code=payload.code,
                 event_type="system_config_created",
-                detail={"name": payload.name, "base_url": payload.base_url, "topics": payload.topics},
+                detail={
+                    "name": payload.name, "base_url": payload.base_url, "topics": payload.topics,
+                    "outbound_secret_set": payload.outbound_secret is not None,
+                },
             )
     return _row_to_system_out(row)
 
@@ -112,10 +130,22 @@ async def create_system(payload: SystemCreate) -> SystemOut:
 @router.patch("/{code}", response_model=SystemOut)
 async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
     raw_updates = payload.model_dump(mode="json", exclude_unset=True)
+    # The outbound secret maps onto one encrypted column; the audit log only
+    # records that it changed (via changed_fields), never the value.
+    outbound_secret = raw_updates.pop("outbound_secret", None)
+    clear_outbound_secret = raw_updates.pop("clear_outbound_secret", False)
+    if outbound_secret and clear_outbound_secret:
+        raise HTTPException(status_code=400, detail="Set outbound_secret or clear_outbound_secret, not both.")
+    if outbound_secret:
+        raw_updates["outbound_secret_encrypted"] = _encrypt_outbound_secret(outbound_secret)
+    elif clear_outbound_secret:
+        raw_updates["outbound_secret_encrypted"] = None
     if not raw_updates:
         raise HTTPException(status_code=400, detail="No fields to update.")
 
-    changed_fields = list(raw_updates.keys())
+    changed_fields = [
+        "outbound_secret" if field == "outbound_secret_encrypted" else field for field in raw_updates
+    ]
     topics_provided = "topics" in raw_updates
     topics = raw_updates.pop("topics", None)
     column_updates = raw_updates

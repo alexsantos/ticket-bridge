@@ -149,6 +149,12 @@ class SystemCreate(BaseModel):
     topics: list[str] = Field(
         default_factory=list, description="Topic codes this system subscribes to."
     )
+    outbound_secret: str | None = Field(
+        default=None,
+        description="Outbound secret value, stored encrypted and never returned - an "
+                    "alternative to auth_config.secret_ref that needs no host access. "
+                    "Takes precedence over secret_ref. See CLAUDE.md Decision 13.",
+    )
 
 
 class SystemUpdate(BaseModel):
@@ -157,6 +163,12 @@ class SystemUpdate(BaseModel):
     auth_config: dict[str, Any] | None = None
     active: bool | None = None
     topics: list[str] | None = None
+    outbound_secret: str | None = Field(
+        default=None, description="Replaces the stored outbound secret (see SystemCreate)."
+    )
+    clear_outbound_secret: bool = Field(
+        default=False, description="Removes the stored outbound secret."
+    )
 
 
 class SystemOut(BaseModel):
@@ -177,6 +189,11 @@ class SystemOut(BaseModel):
         default=False,
         description="Whether an outbound secret_ref is configured. The reference itself, "
                     "and the secret it resolves to, are never returned by this API.",
+    )
+    has_stored_secret: bool = Field(
+        default=False,
+        description="Whether an outbound secret was set via the API/frontend (stored "
+                    "encrypted, never returned). Takes precedence over secret_ref.",
     )
     # auth_config.secret_ref intentionally never returned by the API - unlike
     # header/value_prefix it names where a secret lives, and the frontend has

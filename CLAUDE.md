@@ -303,6 +303,9 @@ token, then use it) or HMAC request signing would need real new code in
 `dispatcher.py`, not a config change - no worse off than before this
 decision, since none of the three original options covered those either.
 
+**Amended by Decision 13**: the secret's value can now also be set from the
+frontend (stored encrypted), not only referenced via `secret_ref`.
+
 ## Decision 10 — Inbound API key lifecycle: an endpoint + a one-time reveal, not manual SQL
 
 **Problem closed**: `api_keys` (the table backing `X-API-Key` on `POST
@@ -465,6 +468,49 @@ teams ever want it as a reference adapter. It's published as its own image
 compose binds it to 127.0.0.1 only); no bridge admin calls - registering it as a
 system stays a manual step in the bridge's Systems tab, so the simulator
 never needs admin credentials.
+
+## Decision 13 — Outbound secrets can be set from the frontend, stored encrypted
+
+**Problem closed**: Decision 9 left the outbound secret's *value* outside
+the bridge - `auth_config.secret_ref` only names an environment variable
+or Secret Manager secret, so setting or rotating one meant shell access
+to the host to edit `.env` and restart. Investigating that surfaced a
+worse bug: `secrets.py` read environment variables **only** when
+`ENVIRONMENT=local` and went to Secret Manager otherwise. On a
+self-hosted VM with `ENVIRONMENT=production` (which Decision 11's
+HTTPS-only session cookie asks for), `.env` secrets were silently
+ignored - and since an unresolved secret meant "deliver without auth",
+destinations received unauthenticated calls with only a log line to
+show for it.
+
+**Decision made** (`migrations/006_stored_outbound_secrets.sql`,
+`app/services/secret_store.py`):
+
+- **A write-only "Outbound secret" field** per system (API
+  `outbound_secret` / `clear_outbound_secret`; `has_stored_secret` in
+  `SystemOut`), same UX as inbound API keys - set, replace or clear,
+  never shown back. The audit log records only that it changed.
+- **Encrypted at rest with Fernet**, keyed by `SECRETS_ENCRYPTION_KEY`
+  from the environment. Unlike `api_keys.key_hash` it can't be a hash -
+  the bridge must send the real value - so the choice was plaintext vs.
+  encrypted; encrypted means a database dump or backup alone reveals
+  nothing. Costs one dependency (`cryptography`) and one key that must be
+  kept: lose or change it and stored secrets have to be re-entered. With
+  no key configured, saving a secret is refused (400), never stored in
+  plaintext as a fallback. Single key, no rotation support (`MultiFernet`
+  would be the extension point if needed).
+- **Stored secret wins over `secret_ref`** when both are set;
+  `secret_ref` stays for Secret Manager / env-var setups.
+- **`resolve_secret` no longer depends on `ENVIRONMENT`**: env var
+  (`secret_ref.upper()`) first, then Secret Manager if
+  `GOOGLE_CLOUD_PROJECT` is set. Only successful lookups are cached, so a
+  Secret Manager outage doesn't leave a secret "missing" for the life of
+  the process.
+- **A configured-but-unavailable secret fails the delivery**
+  (`sync_service.resolve_outbound_secret` raises `DeliveryError`: marked
+  failed, retried, reason in the audit log) instead of sending it
+  without the header. A system with no secret configured at all is
+  still delivered to without auth, as before.
 
 ## What this skeleton assumes and leaves undecided
 

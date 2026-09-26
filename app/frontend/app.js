@@ -197,6 +197,9 @@ const systemDialog = document.getElementById("dialog-system");
 const systemForm = document.getElementById("form-system");
 const clearSecretField = document.getElementById("clear-secret-field");
 const clearSecretCheckbox = document.getElementById("clear-secret-checkbox");
+const clearOutboundSecretField = document.getElementById("clear-outbound-secret-field");
+const clearOutboundSecretCheckbox = document.getElementById("clear-outbound-secret-checkbox");
+const systemFormError = document.getElementById("system-form-error");
 let codeBeingEdited = null;
 
 document.getElementById("btn-new-system").addEventListener("click", () => openSystemDialog(null));
@@ -204,6 +207,10 @@ document.getElementById("btn-cancel-system").addEventListener("click", () => sys
 clearSecretCheckbox.addEventListener("change", () => {
     systemForm.secret_ref.disabled = clearSecretCheckbox.checked;
     if (clearSecretCheckbox.checked) systemForm.secret_ref.value = "";
+});
+clearOutboundSecretCheckbox.addEventListener("change", () => {
+    systemForm.outbound_secret.disabled = clearOutboundSecretCheckbox.checked;
+    if (clearOutboundSecretCheckbox.checked) systemForm.outbound_secret.value = "";
 });
 
 function openSystemDialog(system) {
@@ -222,16 +229,26 @@ function openSystemDialog(system) {
         // SystemOut), so this field always starts blank - only has_secret
         // (whether one is configured at all) is known. Leaving it blank on
         // Save keeps whatever secret_ref is already stored; type a new one
-        // to replace it, or check "Clear stored secret" to remove it.
+        // to replace it, or check "Clear secret reference" to remove it.
         systemForm.secret_ref.placeholder = system.has_secret
-            ? "•••••••• (a secret is configured - leave blank to keep it)"
+            ? "•••••••• (a reference is configured - leave blank to keep it)"
             : "e.g. system_c_outbound_key";
+        // Same for the stored (encrypted) outbound secret: only whether one
+        // exists is known, never its value.
+        systemForm.outbound_secret.placeholder = system.has_stored_secret
+            ? "•••••••• (stored - leave blank to keep it)"
+            : "not set";
     } else {
         systemForm.secret_ref.placeholder = "e.g. system_c_outbound_key";
+        systemForm.outbound_secret.placeholder = "not set";
     }
     clearSecretCheckbox.checked = false;
     systemForm.secret_ref.disabled = false;
-    clearSecretField.hidden = !system;
+    clearSecretField.hidden = !system?.has_secret;
+    clearOutboundSecretCheckbox.checked = false;
+    systemForm.outbound_secret.disabled = false;
+    clearOutboundSecretField.hidden = !system?.has_stored_secret;
+    systemFormError.hidden = true;
     renderSystemTopicsCheckboxes(system ? system.topics : []);
 
     // Inbound API keys are scoped to an existing system_code - nothing to
@@ -250,7 +267,11 @@ function openSystemDialog(system) {
     systemDialog.showModal();
 }
 
-systemForm.addEventListener("submit", async () => {
+systemForm.addEventListener("submit", async (e) => {
+    // Keep the dialog open until the save succeeds, so a rejected save
+    // (e.g. SECRETS_ENCRYPTION_KEY not configured) shows why instead of
+    // silently disappearing.
+    e.preventDefault();
     const data = new FormData(systemForm);
 
     const topics = Array.from(
@@ -282,21 +303,38 @@ systemForm.addEventListener("submit", async () => {
     if (Object.keys(authConfig).length > 0) {
         body.auth_config = authConfig;
     }
+    const outboundSecret = data.get("outbound_secret");
+    if (codeBeingEdited && clearOutboundSecretCheckbox.checked) {
+        body.clear_outbound_secret = true;
+    } else if (outboundSecret) {
+        body.outbound_secret = outboundSecret;
+    }
 
+    let resp;
     if (codeBeingEdited) {
-        await fetch(`${API_BASE}/systems/${codeBeingEdited}`, {
+        resp = await fetch(`${API_BASE}/systems/${codeBeingEdited}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
     } else {
         body.code = data.get("code");
-        await fetch(`${API_BASE}/systems`, {
+        resp = await fetch(`${API_BASE}/systems`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
     }
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        systemFormError.textContent = typeof err.detail === "string"
+            ? err.detail
+            : `Save failed (HTTP ${resp.status}).`;
+        systemFormError.hidden = false;
+        return;
+    }
+    systemForm.outbound_secret.value = ""; // don't leave the secret in the DOM
+    systemDialog.close();
     await loadSystems();
 });
 

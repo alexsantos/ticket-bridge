@@ -4,26 +4,29 @@ secrets.py
 Resolves secret references (`auth_config['secret_ref']`) to their real
 value, without the rest of the code needing to know where they come from.
 
-In production (GCP): the value is read from Secret Manager, with an
-in-memory cache per process (the Cloud Run process is recreated often, so
-the cache never stays stale for long).
+Lookup order, independent of ENVIRONMENT:
+  1. An environment variable named `secret_ref.upper()` (e.g. .env on a VM
+     or in docker compose). Uppercased because secret_ref values follow
+     Secret Manager's own lowercase-with-underscores convention (e.g.
+     `system_a_outbound_key`), while .env files conventionally use
+     SCREAMING_SNAKE_CASE - env var names are case-sensitive, so this
+     mapping has to be explicit rather than an exact-string match.
+  2. Google Secret Manager, if GOOGLE_CLOUD_PROJECT is set (Cloud Run).
 
-In local development: falls back to an environment variable named
-`secret_ref.upper()`, so Secret Manager doesn't need to be available
-locally. Uppercased because secret_ref values follow Secret Manager's
-own lowercase-with-underscores convention (e.g. `system_a_outbound_key`),
-while .env files conventionally use SCREAMING_SNAKE_CASE - env var names
-are case-sensitive, so this mapping has to be explicit rather than an
-exact-string match.
+This used to depend on ENVIRONMENT: only 'local' read environment
+variables, and everything else went to Secret Manager - which silently
+broke `.env` secrets on a self-hosted VM with ENVIRONMENT=production (see
+CLAUDE.md Decision 13).
 
-See README.md, section "Secrets", for instructions on creating secrets in
-Secret Manager and granting access to the Cloud Run service account.
+Secrets set from the frontend don't go through here at all - they're
+stored encrypted on the system row (app/services/secret_store.py).
+
+Only successful lookups are cached, so a Secret Manager outage or a
+secret created after startup doesn't stay "missing" for the life of the
+process.
 """
 import logging
 import os
-from functools import lru_cache
-
-from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -38,32 +41,32 @@ def _get_secret_manager_client():
     return _secret_manager_client
 
 
-@lru_cache(maxsize=64)
+_cache: dict[str, str] = {}
+
+
 def resolve_secret(secret_ref: str) -> str | None:
-    """
-    Resolves a secret_ref to its value.
+    """Resolves a secret_ref to its value, or None if it can't be found anywhere."""
+    if secret_ref in _cache:
+        return _cache[secret_ref]
 
-    - environment == 'local': reads from os.environ[secret_ref.upper()].
-    - otherwise: reads the 'latest' version of the matching secret in the
-      current GCP project's Secret Manager (GOOGLE_CLOUD_PROJECT).
-    """
-    settings = get_settings()
+    value = os.environ.get(secret_ref.upper())
+    if value is None:
+        value = _from_secret_manager(secret_ref)
+    if value is None:
+        logger.warning(
+            "Secret '%s' not found: no %s environment variable%s.",
+            secret_ref, secret_ref.upper(),
+            "" if os.environ.get("GOOGLE_CLOUD_PROJECT") else " (and GOOGLE_CLOUD_PROJECT is unset, so Secret Manager wasn't tried)",
+        )
+        return None
+    _cache[secret_ref] = value
+    return value
 
-    if settings.environment == "local":
-        env_var_name = secret_ref.upper()
-        value = os.environ.get(env_var_name)
-        if value is None:
-            logger.warning(
-                "Secret '%s' not found in local environment variables (expected %s).",
-                secret_ref, env_var_name,
-            )
-        return value
 
+def _from_secret_manager(secret_ref: str) -> str | None:
     project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
     if not project_id:
-        logger.error("GOOGLE_CLOUD_PROJECT not set - cannot resolve secrets.")
         return None
-
     try:
         client = _get_secret_manager_client()
         name = f"projects/{project_id}/secrets/{secret_ref}/versions/latest"

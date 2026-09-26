@@ -22,7 +22,7 @@ import logging
 
 from app.config import get_settings
 from app.database import get_connection
-from app.services import outbox_service
+from app.services import outbox_service, secret_store
 from app.services.audit_service import record_audit
 from app.services.dispatcher import DeliveryError, deliver
 from app.services.secrets import resolve_secret
@@ -52,15 +52,12 @@ async def run_sync_batch() -> dict:
                     detail.append({"outbox_id": entry["id"], "result": "inactive_system_failure"})
                     continue
 
-                secret_ref = destination_system["auth_config"].get("secret_ref")
-                resolved_secret = resolve_secret(secret_ref) if secret_ref else None
-
                 try:
                     await deliver(
                         base_url=destination_system["base_url"],
                         auth_config=destination_system["auth_config"],
                         payload=entry["payload"],
-                        resolved_secret=resolved_secret,
+                        resolved_secret=resolve_outbound_secret(destination_system),
                     )
                 except DeliveryError as exc:
                     await outbox_service.mark_failed(conn, outbox_id=entry["id"], error=str(exc))
@@ -90,10 +87,39 @@ async def run_sync_batch() -> dict:
     return {"processed": processed, "success": success, "failures": failures, "detail": detail}
 
 
+def resolve_outbound_secret(system: dict) -> str | None:
+    """
+    The secret to send to `system`, or None if it has none configured.
+
+    A secret stored from the frontend (encrypted on the row) wins over
+    auth_config.secret_ref. If one is configured but can't be obtained,
+    this raises DeliveryError, so the entry is marked failed and retried -
+    rather than delivered without auth, which is what used to happen when
+    a secret_ref didn't resolve (see CLAUDE.md Decision 13).
+    """
+    if system.get("outbound_secret_encrypted"):
+        try:
+            return secret_store.decrypt(system["outbound_secret_encrypted"])
+        except secret_store.SecretStoreError as exc:
+            raise DeliveryError(str(exc)) from exc
+
+    secret_ref = (system.get("auth_config") or {}).get("secret_ref")
+    if not secret_ref:
+        return None
+    value = resolve_secret(secret_ref)
+    if value is None:
+        raise DeliveryError(
+            f"Outbound secret_ref '{secret_ref}' could not be resolved (no {secret_ref.upper()} "
+            "environment variable, and not found in Secret Manager) - not delivering without auth."
+        )
+    return value
+
+
 async def _get_system_config(conn, code: str) -> dict | None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT code, base_url, auth_config, active FROM systems WHERE code = %(code)s",
+            "SELECT code, base_url, auth_config, outbound_secret_encrypted, active "
+            "FROM systems WHERE code = %(code)s",
             {"code": code},
         )
         return await cur.fetchone()

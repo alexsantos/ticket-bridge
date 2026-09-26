@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 5
     login_lockout_minutes: int = 15
 
+    # Key for encrypting outbound secrets entered in the frontend
+    # (systems.outbound_secret_encrypted - see app/services/secret_store.py,
+    # CLAUDE.md Decision 13). Empty means the frontend can't store secrets;
+    # auth_config.secret_ref still works.
+    secrets_encryption_key: str = ""
+
     # Log level.
     log_level: str = "INFO"
 
