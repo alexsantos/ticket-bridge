@@ -5,11 +5,8 @@ Unit tests for the admin-authentication helpers in app/security.py:
 password hashing (bcrypt), session token generation, and the parts of
 require_login that don't need a live database (the no-cookie -> 401 path).
 
-The DB-lookup branch of require_login, and the full login -> me -> logout
-round trip, need a real Postgres connection and are not covered here -
-this project has no DB-backed pytest tests (see tests/test_dispatcher.py,
-tests/test_outbound_secrets.py); see README.md's "Verifying auth locally"
-checklist for that manual verification instead.
+The DB-lookup branch of require_login and the full login -> me -> logout
+round trip are covered against a real database in tests/test_api_auth.py.
 
     pytest tests/test_auth_security.py -v
 """

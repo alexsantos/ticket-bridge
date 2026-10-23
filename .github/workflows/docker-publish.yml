@@ -8,6 +8,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Integration tests (tests/conftest.py) create one database per test on
+    # this server - see TEST_DATABASE_URL below.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -23,8 +37,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
-      - name: Run tests
-        run: uv run pytest tests/ -v
+      - name: Run tests with coverage (fails below 80% - pyproject.toml)
+        run: uv run pytest --cov -v
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
   build-and-push:
     needs: test
@@ -101,7 +117,7 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Run tests
-        run: uv run pytest -v
+        run: uv run pytest --cov -v
 
   build-and-push-simulator:
     needs: test-simulator

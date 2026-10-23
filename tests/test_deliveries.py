@@ -5,8 +5,8 @@ Unit tests for POST /api/v1/deliveries/retry's orchestration
 (app/api/deliveries.py): which requested ids are reported as retried vs.
 skipped, and that each retried entry gets an audit row carrying its
 pre-reset attempts/error. The SQL itself (outbox_service.requeue_failed:
-only 'failed' rows are touched) needs a real Postgres, which this project's
-tests don't use - see tests/test_auth_security.py.
+only 'failed' rows are touched) is covered against a real database in
+tests/test_sync_and_deliveries.py.
 
     pytest tests/test_deliveries.py -v
 """

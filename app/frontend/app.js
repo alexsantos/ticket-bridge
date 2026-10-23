@@ -138,6 +138,16 @@ function statusPill(status) {
     return `<span class="pill ${s.pill}">${escapeHtml(s.label)}</span>`;
 }
 
+// The latest status any system reported. conversations.overall_status is
+// only set when a conversation is created (nothing updates it afterwards),
+// so on its own it would show "New" forever.
+function currentStatus(c) {
+    const latest = [...(c.participants ?? [])]
+        .filter((p) => p.local_status)
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+    return latest?.local_status ?? c.overall_status;
+}
+
 function eventLabel(event) {
     return event === "ticket.created" ? "New ticket" : event === "ticket.updated" ? "Update" : (event ?? "Message");
 }
@@ -569,7 +579,7 @@ function conversationRow(c) {
                 <span class="row-subtitle">${escapeHtml(topicName(c.topic_code))}${refs ? ` – ${escapeHtml(refs)}` : ""}</span>
             </span>
             <span class="row-trailing">
-                ${statusPill(c.overall_status)}
+                ${statusPill(currentStatus(c))}
                 <span class="row-time">${escapeHtml(formatRelative(c.updated_at))}</span>
                 ${CHEVRON}
             </span>
@@ -699,7 +709,7 @@ async function renderConversation(id) {
             <h1 class="conversation-title">${escapeHtml(c.subject || "Untitled conversation")}</h1>
             <div class="conversation-tags">
                 <span class="pill pill-blue">${icon("i-tag")}${escapeHtml(topicName(c.topic_code))}</span>
-                ${statusPill(c.overall_status)}
+                ${statusPill(currentStatus(c))}
                 <button type="button" class="pill pill-mono" id="btn-copy-conversation-id" title="Copy the full conversation ID">${icon("i-copy")}${escapeHtml(c.conversation_id.slice(0, 8))}</button>
             </div>
         </div>

@@ -39,6 +39,24 @@ demo that lets you watch a real payload arrive over HTTP.
 
 See **`CLAUDE.md`** for the full rationale behind the architecture decisions.
 
+### What it looks like
+
+The admin panel follows Apple's design language: a sidebar on the desktop,
+a tab bar on a phone, automatic dark mode. Every conversation reads as a
+thread, with a receipt for each system it was delivered to.
+
+![Overview: failed deliveries, delivery counts and recent conversations](docs/screenshots/overview.jpg)
+
+| A conversation, as a thread | …and in dark mode |
+|---|---|
+| ![A conversation between two systems, with delivery receipts under each message](docs/screenshots/conversation.jpg) | ![The same conversation in dark mode](docs/screenshots/conversation-dark.jpg) |
+| **Deliveries**: what was sent where, and what failed | **One delivery**: why it failed, the exact payload, *Retry* |
+| ![Deliveries list with delivered and failed entries](docs/screenshots/deliveries.jpg) | ![A failed delivery's detail sheet](docs/screenshots/delivery-detail.jpg) |
+| **Setup**: a system's settings | **Simulator**: a stand-in system, like Messages |
+| ![A system's settings sheet](docs/screenshots/system-settings.jpg) | ![The simulator showing the same conversation from one system's side](docs/screenshots/simulator.jpg) |
+
+![The admin panel and the simulator on a phone](docs/screenshots/mobile.jpg)
+
 ---
 
 ## Integration contract
@@ -281,7 +299,11 @@ ticket-bridge/
 │   ├── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
 │   └── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
 ├── tests/
-│   └── test_payload_builder.py
+│   ├── conftest.py              # real Postgres per test (Docker or TEST_DATABASE_URL), app client fixtures
+│   ├── helpers.py               # seeded keys/credentials, send_event(), query()
+│   ├── test_api_*.py            # integration: each router over HTTP against a real database
+│   ├── test_sync_and_deliveries.py  # integration: outbox delivery, retries, failed -> retry
+│   └── test_*.py                # unit: dispatcher, payload builder, secrets, auth helpers, scheduler
 ├── examples/
 │   ├── README.md                # flagship walkthrough: patient insurance verification "chat"
 │   ├── walkthrough.sh           # runs the full scenario locally
@@ -386,14 +408,21 @@ to tickets. The compose file has two of them (`simulator-a` and
 `docker compose --profile simulator up -d`, see
 [`simulator/README.md`](simulator/README.md).
 
-To run the automated tests:
+To run the automated tests, with a coverage report:
 ```bash
-uv run pytest tests/ -v
+uv run pytest --cov
 ```
+Most tests are integration tests: the real app, over HTTP, against a real
+Postgres - one fresh database per test, cloned from a template with every
+migration applied (`tests/conftest.py`). Locally they start a throwaway
+`postgres:17-alpine` container with Docker by themselves; to use an
+existing server instead, set `TEST_DATABASE_URL` to one where the tests
+may create databases (CI does this with a Postgres service container).
+Without either, only the unit tests run. Coverage must stay at or above
+80% (`[tool.coverage.report]` in `pyproject.toml`), or CI fails.
 
-**Verifying auth locally** — the login/session round trip needs a live
-database, so it isn't covered by the pytest suite above (see
-`tests/test_auth_security.py`'s docstring); check it manually instead:
+**Verifying auth by hand** — the login/session round trip is covered by
+`tests/test_api_auth.py`; to see it against your own running instance:
 ```bash
 # 1. Rejected before login
 curl -i http://localhost:8080/api/v1/systems   # expect 401
@@ -980,8 +1009,9 @@ defense-in-depth on top of the above, rather than the only mechanism.
 
 Two GitHub Actions workflows live in `.github/workflows/`:
 
-- **`tests.yml`** — runs `uv run pytest tests/ -v` on every push to `main`
-  and on every pull request targeting `main`. This is the "Tests" badge at
+- **`tests.yml`** — runs `uv run pytest --cov -v` (with a Postgres service
+  container for the integration tests, failing below 80% coverage) on
+  every push to `main` and on every pull request targeting `main`. This is the "Tests" badge at
   the top of this file.
 - **`docker-publish.yml`** — on every push to `main` (and on tags matching
   `X.Y.Z`, no `v` prefix), runs the test suite again as a gate, then builds

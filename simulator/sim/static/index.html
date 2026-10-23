@@ -1,172 +1,257 @@
 <!DOCTYPE html>
 <!--
     Ticket Bridge Simulator - a stand-in external support system.
-    Tickets: open tickets through the bridge, see what it delivers, reply.
-    Config: bridge URL, this system's API key, webhook auth. See
-    simulator/README.md.
+
+    Laid out like Messages / Mail: tickets on the left, the selected
+    ticket's conversation on the right (its own messages as blue bubbles on
+    the right, what the bridge delivered on the left), with a composer at
+    the bottom to reply. On a phone the list and the conversation are two
+    screens. Settings and "New ticket" are sheets. Hash routes
+    (#/tickets/<id>, #/settings) so reload and Back keep your place.
+
+    Talks only to the simulator's own API (api/...). See simulator/README.md.
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ticket Bridge Simulator</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230f766e'/%3E%3Cpath d='M4 5h8M4 8h8M4 11h5' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>Simulator – Ticket Bridge</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2330b0c7'/%3E%3Cpath d='M16 22a6 6 0 0 1 6-6h20a6 6 0 0 1 6 6v12a6 6 0 0 1-6 6H28l-8 7v-7.5A6 6 0 0 1 16 34z' fill='white'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header>
-        <h1>Ticket Bridge Simulator</h1>
-        <p class="subtitle">A stand-in support system: <strong id="header-system">…</strong> at <span id="header-bridge">…</span></p>
-    </header>
+    <svg xmlns="http://www.w3.org/2000/svg" hidden>
+        <symbol id="i-compose" viewBox="0 0 24 24"><path d="M12 4H6.5A2.5 2.5 0 0 0 4 6.5v11A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V12"/><path d="M17.8 3.8a1.8 1.8 0 0 1 2.5 2.5L12 14.5 9 15.2l.7-3z"/></symbol>
+        <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4 4"/></symbol>
+        <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+        <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 18V7M7 11.5 12 6.5l5 5"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></symbol>
+        <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3h-6l-4.5 3.5V16A3 3 0 0 1 4 13z"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1"/><path d="M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 21 19.5H3z"/><path d="M12 10v4M12 16.8v.2"/></symbol>
+        <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.2 2.6 2.6 5-5"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+        <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3.5 9.5a12 12 0 0 1 17 0M6.5 12.5a8 8 0 0 1 11 0M9.5 15.5a4 4 0 0 1 5 0"/><circle cx="12" cy="18.5" r="0.6"/></symbol>
+    </svg>
 
-    <nav class="tabs">
-        <button class="tab-btn active" data-tab="tickets">Tickets</button>
-        <button class="tab-btn" data-tab="config">Config</button>
-    </nav>
-
-    <main>
-        <!-- ================= TICKETS ================= -->
-        <section id="tab-tickets" class="tab-panel active">
-            <div class="panel-header">
-                <h2>Tickets</h2>
-                <div class="panel-actions">
-                    <label class="checkbox"><input type="checkbox" id="auto-refresh" checked> Auto-refresh</label>
-                    <button type="button" id="btn-refresh" class="btn-secondary">↻ Refresh</button>
-                    <button type="button" id="btn-new-ticket" class="btn-primary">+ New ticket</button>
+    <div class="app" id="app">
+        <!-- ================= TICKET LIST ================= -->
+        <aside class="list-pane" aria-label="Tickets">
+            <header class="pane-bar">
+                <button type="button" class="identity" id="btn-identity" title="Settings">
+                    <span class="avatar" id="identity-avatar" aria-hidden="true">S</span>
+                    <span class="identity-text">
+                        <span class="identity-name" id="identity-name">…</span>
+                        <span class="identity-sub" id="identity-bridge">…</span>
+                    </span>
+                </button>
+                <div class="toolbar">
+                    <a class="tool-btn" href="#/settings" aria-label="Settings" title="Settings">
+                        <svg class="icon"><use href="#i-gear"/></svg>
+                    </a>
+                    <button type="button" class="tool-btn" id="btn-new-ticket" aria-label="New ticket" title="New ticket">
+                        <svg class="icon"><use href="#i-compose"/></svg>
+                    </button>
+                </div>
+            </header>
+            <div class="list-head">
+                <h1 class="large-title">Tickets</h1>
+                <label class="search-field">
+                    <svg class="icon"><use href="#i-search"/></svg>
+                    <input type="search" id="search" placeholder="Search" aria-label="Search tickets">
+                </label>
+                <div class="segmented" role="radiogroup" aria-label="Show" id="origin-filter">
+                    <button type="button" role="radio" data-value="" aria-checked="true">All</button>
+                    <button type="button" role="radio" data-value="received">Received</button>
+                    <button type="button" role="radio" data-value="sent">Opened here</button>
                 </div>
             </div>
+            <div class="ticket-list" id="ticket-list" role="list"></div>
+            <footer class="list-foot">
+                <label class="live-toggle">
+                    <input type="checkbox" class="switch switch-small" id="auto-refresh" checked>
+                    <span>Check for new messages</span>
+                </label>
+            </footer>
+        </aside>
 
-            <div class="split">
-                <div class="ticket-list">
-                    <table id="table-tickets">
-                        <thead><tr><th>Ref</th><th>Subject</th><th>Status</th><th>Updated</th></tr></thead>
-                        <tbody></tbody>
-                    </table>
-                    <p id="tickets-empty" class="hint" hidden>
-                        No tickets yet. Open one with "+ New ticket", or open one from another
-                        system on a topic this system subscribes to.
+        <!-- ================= CONVERSATION ================= -->
+        <main class="detail-pane" id="detail-pane">
+            <div class="detail-empty" id="detail-empty">
+                <svg class="icon"><use href="#i-chat"/></svg>
+                <p class="empty-title">No ticket selected</p>
+                <p class="empty-text">Pick a ticket to read its conversation and reply, or start a new one.</p>
+                <button type="button" class="btn btn-filled" id="btn-empty-new">New ticket</button>
+            </div>
+
+            <div class="conversation" id="conversation" hidden>
+                <header class="conversation-bar">
+                    <a class="back-link" href="#/tickets"><svg class="icon"><use href="#i-back"/></svg><span>Tickets</span></a>
+                    <div class="conversation-heading">
+                        <h2 id="conv-title"></h2>
+                        <p id="conv-meta"></p>
+                    </div>
+                    <span id="conv-status"></span>
+                </header>
+
+                <div class="thread-scroll" id="thread-scroll">
+                    <p class="banner" id="conv-unlinked" hidden>
+                        <svg class="icon"><use href="#i-link"/></svg>
+                        <span>Not linked yet. The bridge doesn't know this ticket's number until you reply, so it keeps sending updates as new tickets.</span>
                     </p>
+                    <ol class="thread" id="thread"></ol>
                 </div>
 
-                <div id="ticket-detail" class="ticket-detail">
-                    <p class="hint">Select a ticket to see its conversation.</p>
-                </div>
+                <form class="composer" id="composer" novalidate>
+                    <p class="composer-error" role="alert" hidden></p>
+                    <div class="composer-extra" id="composer-extra" hidden>
+                        <label class="visually-hidden" for="composer-metadata">Extra fields (JSON)</label>
+                        <textarea id="composer-metadata" name="metadata" rows="2" placeholder='Extra fields as JSON, e.g. {"insurance_number": "INS-2298104"}'></textarea>
+                    </div>
+                    <div class="composer-row">
+                        <button type="button" class="round-btn" id="btn-composer-extra" aria-label="Add extra fields" aria-expanded="false" title="Extra fields">
+                            <svg class="icon"><use href="#i-plus"/></svg>
+                        </button>
+                        <label class="status-picker">
+                            <span class="visually-hidden">Status</span>
+                            <select name="status" class="status-select"></select>
+                        </label>
+                        <label class="composer-field">
+                            <span class="visually-hidden">Note</span>
+                            <textarea name="note" rows="1" placeholder="Note"></textarea>
+                        </label>
+                        <button type="submit" class="send-btn" aria-label="Send reply" title="Send">
+                            <svg class="icon"><use href="#i-send"/></svg>
+                        </button>
+                    </div>
+                </form>
             </div>
-        </section>
+        </main>
+    </div>
 
-        <!-- ================= CONFIG ================= -->
-        <section id="tab-config" class="tab-panel">
-            <div class="panel-header"><h2>Config</h2></div>
-            <form id="form-config" class="card">
-                <h3>Connection to the bridge</h3>
-                <label>Bridge URL (including any path prefix)
-                    <input type="url" name="bridge_url" required placeholder="http://localhost:8080">
-                </label>
-                <label>System code (as registered in the bridge - shown on messages you send)
-                    <input type="text" name="system_code" placeholder="e.g. simulator">
-                </label>
-                <label>API key (the inbound key the bridge generated for this system)
-                    <input type="password" name="api_key" autocomplete="off">
-                </label>
-                <div class="row">
-                    <button type="button" id="btn-test" class="btn-secondary">Test saved connection</button>
-                    <span id="test-result" class="hint" aria-live="polite"></span>
-                </div>
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-                <h3>Tickets</h3>
-                <label>Ticket ref prefix (this system's own ticket IDs, e.g. SIM-0001)
-                    <input type="text" name="ref_prefix" required>
-                </label>
-                <label>Default topic for new tickets
-                    <input type="text" name="default_topic" placeholder="e.g. PATIENT_ADMIN">
-                </label>
-
-                <h3>Webhook (bridge → this system)</h3>
-                <p class="hint">
-                    Set the system's <strong>Base URL</strong> in the bridge to
-                    <code id="webhook-url"></code> - or, under docker compose,
-                    <code>http://simulator-a:8090/webhook</code> /
-                    <code>http://simulator-b:8090/webhook</code>
-                    (the service name, not the host port).
-                </p>
-                <label>Expected auth header
-                    <input type="text" name="inbound_header" placeholder="X-API-Key">
-                </label>
-                <label>Expected header value (optional - leave empty to accept unauthenticated deliveries)
-                    <input type="password" name="inbound_secret" autocomplete="off">
-                </label>
-                <p class="hint">
-                    Must match exactly what the bridge sends: the value prefix (e.g. "Bearer ")
-                    followed by the outbound secret set for this system in the bridge's Systems tab.
-                </p>
-                <label class="checkbox" id="clear-inbound-secret-field" hidden>
-                    <input type="checkbox" name="clear_inbound_secret"> Clear stored header value
-                </label>
-
-                <div class="row">
-                    <button type="submit" class="btn-primary">Save</button>
-                    <span id="config-saved" class="hint" aria-live="polite"></span>
-                </div>
-            </form>
-        </section>
-    </main>
-
-    <dialog id="dialog-new-ticket">
-        <form id="form-new-ticket">
-            <h3>New ticket</h3>
-            <label>Topic
-                <input type="text" name="topic_code" required placeholder="e.g. PATIENT_ADMIN">
-            </label>
-            <label>Subject
-                <input type="text" name="subject" required>
-            </label>
-            <label>Status
-                <select name="status" class="status-select"></select>
-            </label>
-            <label>Note (sent as metadata.note)
-                <textarea name="note" rows="3"></textarea>
-            </label>
-            <label>Extra metadata (optional JSON object)
-                <textarea name="metadata" rows="3" placeholder='{"insurance_number": "INS-2298104"}'></textarea>
-            </label>
-            <p class="form-error" hidden></p>
-            <div class="dialog-actions">
-                <button type="button" class="btn-secondary" id="btn-cancel-new-ticket">Cancel</button>
-                <button type="submit" class="btn-primary">Send to bridge</button>
+    <!-- ================= NEW TICKET ================= -->
+    <dialog class="sheet" id="sheet-new-ticket" aria-labelledby="new-ticket-title">
+        <form id="form-new-ticket" novalidate>
+            <header class="sheet-bar">
+                <button type="button" class="text-btn" data-close>Cancel</button>
+                <h2 id="new-ticket-title">New ticket</h2>
+                <button type="submit" class="text-btn text-btn-strong">Send</button>
+            </header>
+            <div class="sheet-body">
+                <p class="form-error" role="alert" hidden></p>
+                <section class="group">
+                    <div class="list form-list">
+                        <label class="form-row">
+                            <span class="form-label">Topic</span>
+                            <input type="text" name="topic_code" required placeholder="Required, e.g. PATIENT_ADMIN" autocapitalize="characters" spellcheck="false">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">Subject</span>
+                            <input type="text" name="subject" required placeholder="Required">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">Status</span>
+                            <select name="status" class="status-select inline-select"></select>
+                        </label>
+                    </div>
+                    <p class="group-footer">This system must be subscribed to the topic in the bridge to open a ticket on it.</p>
+                </section>
+                <section class="group">
+                    <h3 class="group-title">Message</h3>
+                    <div class="list form-list">
+                        <label class="form-row form-row-stacked">
+                            <span class="form-label">Note</span>
+                            <textarea name="note" rows="3" placeholder="Sent as metadata.note"></textarea>
+                        </label>
+                        <label class="form-row form-row-stacked">
+                            <span class="form-label">Extra fields (JSON)</span>
+                            <textarea name="metadata" rows="2" class="mono" placeholder='{"insurance_number": "INS-2298104"}'></textarea>
+                        </label>
+                    </div>
+                    <p class="group-footer">Use the field names the topic's description in the bridge asks for.</p>
+                </section>
             </div>
         </form>
     </dialog>
 
-    <template id="tpl-detail">
-        <div class="detail-header">
-            <div>
-                <h3 class="detail-title"></h3>
-                <p class="detail-meta"></p>
-            </div>
-            <span class="badge detail-status"></span>
-        </div>
-        <p class="hint warning detail-unlinked" hidden>
-            Not linked yet: the bridge doesn't know this ticket's ref until you reply,
-            so it keeps delivering updates as <code>ticket.created</code>.
-        </p>
-        <ol class="timeline"></ol>
-        <form class="reply-form">
-            <h4>Reply</h4>
-            <div class="row">
-                <label>Status <select name="status" class="status-select"></select></label>
-            </div>
-            <label>Note
-                <textarea name="note" rows="2"></textarea>
-            </label>
-            <label>Extra metadata (optional JSON object)
-                <textarea name="metadata" rows="2"></textarea>
-            </label>
-            <p class="form-error" hidden></p>
-            <div class="dialog-actions">
-                <button type="submit" class="btn-primary">Send reply</button>
+    <!-- ================= SETTINGS ================= -->
+    <dialog class="sheet" id="sheet-settings" aria-labelledby="settings-title">
+        <form id="form-config" novalidate>
+            <header class="sheet-bar">
+                <button type="button" class="text-btn" data-close>Cancel</button>
+                <h2 id="settings-title">Settings</h2>
+                <button type="submit" class="text-btn text-btn-strong">Save</button>
+            </header>
+            <div class="sheet-body">
+                <p class="form-error" role="alert" hidden></p>
+
+                <section class="group">
+                    <h3 class="group-title">Connection to the bridge</h3>
+                    <div class="list form-list">
+                        <label class="form-row form-row-stacked">
+                            <span class="form-label">Bridge URL</span>
+                            <input type="url" name="bridge_url" required placeholder="http://localhost:8080" autocapitalize="off" spellcheck="false">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">System code</span>
+                            <input type="text" name="system_code" placeholder="simulator" autocapitalize="off" spellcheck="false">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">API key</span>
+                            <input type="password" name="api_key" autocomplete="off">
+                        </label>
+                        <button type="button" class="list-button" id="btn-test">
+                            <svg class="icon"><use href="#i-wifi"/></svg><span>Test saved connection</span>
+                        </button>
+                    </div>
+                    <p class="group-footer" id="test-result">The URL includes any path prefix. The API key is the one the bridge generated for this system, and it's only checked when you send a ticket.</p>
+                </section>
+
+                <section class="group">
+                    <h3 class="group-title">Tickets</h3>
+                    <div class="list form-list">
+                        <label class="form-row">
+                            <span class="form-label">Number prefix</span>
+                            <input type="text" name="ref_prefix" required placeholder="SIM" autocapitalize="characters" spellcheck="false">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">Default topic</span>
+                            <input type="text" name="default_topic" placeholder="None" autocapitalize="characters" spellcheck="false">
+                        </label>
+                    </div>
+                    <p class="group-footer">This system's own ticket numbers look like <span id="ref-example">SIM-0001</span>. The default topic prefills new tickets.</p>
+                </section>
+
+                <section class="group">
+                    <h3 class="group-title">Messages from the bridge</h3>
+                    <div class="list form-list">
+                        <div class="form-row">
+                            <span class="form-label">Webhook</span>
+                            <code class="form-value" id="webhook-url"></code>
+                            <button type="button" class="text-btn" id="btn-copy-webhook" aria-label="Copy webhook URL"><svg class="icon"><use href="#i-copy"/></svg></button>
+                        </div>
+                        <label class="form-row">
+                            <span class="form-label">Header</span>
+                            <input type="text" name="inbound_header" placeholder="X-API-Key" autocapitalize="off" spellcheck="false">
+                        </label>
+                        <label class="form-row form-row-stacked">
+                            <span class="form-label">Expected value</span>
+                            <input type="password" name="inbound_secret" autocomplete="off">
+                        </label>
+                        <label class="form-row form-row-switch" id="clear-inbound-secret-field" hidden>
+                            <span class="form-label">Accept messages without it</span>
+                            <input type="checkbox" class="switch" name="clear_inbound_secret">
+                        </label>
+                    </div>
+                    <p class="group-footer">Set this system's webhook URL in the bridge to the one above, or under docker compose to <code>http://simulator-a:8090/webhook</code> / <code>http://simulator-b:8090/webhook</code>. If the bridge sends a secret, enter exactly what it sends, prefix included (e.g. <code>Bearer abc123</code>). Messages that don't match are refused, which shows up in the bridge as a failed delivery.</p>
+                </section>
             </div>
         </form>
-    </template>
+    </dialog>
 
     <script src="app.js"></script>
 </body>

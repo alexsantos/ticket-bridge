@@ -671,6 +671,22 @@ pagination on the conversations list beyond the API's 200 most recent
 (client-side search over those); dark mode follows the OS only, with no
 in-app switch.
 
+**Status shown for a conversation**: the latest `local_status` any
+participant reported, not `conversations.overall_status` - nothing
+updates that column after creation
+(`correlation_service.update_conversation_overall_status` is never
+called), so it would read "New" forever. Fixing the column itself is a
+backend decision left open (see "What this skeleton assumes and leaves
+undecided").
+
+**Update - the simulator too**: `simulator/sim/static` got the same
+treatment, modelled on Messages/Mail since the simulator *is* a
+participant: a ticket list next to the open conversation, its own
+messages as blue bubbles on the right, a composer at the bottom,
+Settings and New ticket as sheets. Still its own copy of the styles,
+never imported from `app/frontend` (Decision 12). Screenshots of both
+are in `docs/screenshots/`, used by README.md.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the
@@ -679,6 +695,12 @@ in-app switch.
   conversation's `overall_status` is informational, not a normative source
   of truth. If an explicit per-direction field owner is needed (as
   initially discussed), the place to extend is `correlation_service.py`.
+- **`conversations.overall_status`** is written once, at creation, and
+  never updated (`update_conversation_overall_status` and
+  `get_participant_status` in `correlation_service.py` exist but nothing
+  calls them). The frontend shows the latest participant status instead
+  (Decision 17). Whether the column should follow the latest event, be
+  derived, or be dropped is undecided.
 - **Failure alerts** (e.g. Telegram, as used in other projects by the
   author): not implemented in this skeleton; the natural place is inside
   `outbox_service.mark_failed`, when an entry reaches `max_attempts`.
@@ -694,3 +716,10 @@ in-app switch.
 - `app/services/` holds pure business logic, with no dependency on
   FastAPI; `app/api/` holds thin HTTP orchestration on top of the
   services.
+- Tests that touch the database run against a real Postgres, never a
+  mocked connection - most of the logic *is* SQL (Decision 6).
+  `tests/conftest.py` migrates a template database once and clones it
+  per test; Postgres comes from `TEST_DATABASE_URL` (CI's service
+  container) or a throwaway Docker container. Only outbound HTTP is
+  replaced (the `deliveries` fixture). Coverage must stay at or above
+  80% for both the bridge and the simulator, or CI fails.

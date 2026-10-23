@@ -210,4 +210,17 @@ def test_config() -> dict[str, str]:
         raise HTTPException(status_code=502, detail=exc.detail) from exc
 
 
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")
+class RevalidatingStaticFiles(StaticFiles):
+    """
+    `Cache-Control: no-cache` on the frontend's files, so a browser always
+    revalidates them instead of running an old app.js/style.css against a
+    newer simulator after an upgrade (no build step, so no hashed names).
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["cache-control"] = "no-cache"
+        return response
+
+
+app.mount("/", RevalidatingStaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

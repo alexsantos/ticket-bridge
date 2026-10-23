@@ -10,9 +10,13 @@ README.md, "Integration contract"):
   `POST /api/v1/events` with its own API key.
 - **Receive tickets**: the bridge delivers `ticket.created` /
   `ticket.updated` to the simulator's `POST /webhook`, and each ticket
-  shows the whole exchange as a chat-like timeline, `metadata` included.
-- **Config page**: bridge URL, this system's API key, its ticket ref
-  prefix, default topic, and optional webhook authentication.
+  shows the whole exchange as a conversation, like Messages: your own
+  messages in blue on the right, what the bridge delivered on the left,
+  `metadata` included.
+- **Settings** (the gear): bridge URL, this system's API key, its ticket
+  number prefix, default topic, and optional webhook authentication.
+
+![The simulator: tickets on the left, the selected conversation on the right](../docs/screenshots/simulator.jpg)
 
 It's independent of the bridge's code on purpose: its own dependencies,
 its own copy of the contract (`sim/contract.py`), and no imports from
@@ -24,7 +28,7 @@ State (config, tickets, messages) is a SQLite file in `SIM_DATA_DIR`.
 The compose file runs **two** simulators, `simulator-a` and `simulator-b`,
 so you can play both sides of a conversation (or use just one next to a
 real system). Register each one you use as its own system in the bridge's
-admin panel, **Systems → + New system**:
+admin panel, **Setup › Systems → Add system**:
 
 | | simulator-a | simulator-b |
 |---|---|---|
@@ -85,7 +89,8 @@ uv run uvicorn sim.main:app --port 8090
 
 ## 3. Configure it
 
-In each simulator's **Config** tab, paste its own API key, check the
+In each simulator's **Settings** (the gear, or click its name at the top
+left), paste its own API key, check the
 system code matches what you registered, and set a default topic. The
 bridge URL is already `http://app:8080` under compose (set it to e.g.
 `http://localhost:8080` when running directly). **Test saved connection** checks the bridge is reachable;
@@ -95,11 +100,11 @@ side-effect-free way to validate it).
 Every setting can also be seeded from the environment on first start
 (`SIM_BRIDGE_URL`, `SIM_SYSTEM_CODE`, `SIM_API_KEY`, `SIM_REF_PREFIX`,
 `SIM_DEFAULT_TOPIC`, `SIM_INBOUND_HEADER`, `SIM_INBOUND_SECRET`); once
-saved from the Config page, the saved value wins.
+saved from Settings, the saved value wins.
 
 **Webhook authentication (optional)**: if the bridge is configured to send
-a secret to this system (the "Bridge → this system" group in its Systems
-dialog: header name, value prefix, secret), set the same header name and
+a secret to this system (*How the bridge signs in to this system* in its
+settings: header, value prefix, secret), set the same header and
 the exact value it sends (prefix included, e.g. `Bearer abc123`). Deliveries
 that don't match get a 401, which shows up in the bridge's audit log as a
 delivery failure - handy for testing that config. Leave it empty to accept
@@ -107,12 +112,15 @@ every delivery.
 
 ## 4. Use it
 
-- **+ New ticket** opens a conversation from the simulator's side (the
-  system must be subscribed to that topic in the bridge).
-- Tickets opened by other systems appear automatically (auto-refresh
-  every 3 s), marked with a dot while you haven't looked at them.
-- **Reply** on any ticket: status, a note (sent as `metadata.note`) and
-  optional extra `metadata` as a JSON object.
+- **The compose button** (top of the list) opens a conversation from the
+  simulator's side (the system must be subscribed to that topic in the
+  bridge).
+- Tickets opened by other systems appear automatically while *Check for
+  new messages* is on (every 3 s), with a blue dot until you open them.
+  *Received* / *Opened here* filter the list.
+- **Reply** from the bar at the bottom of a conversation: pick the status,
+  type a note (sent as `metadata.note`; Enter sends, Shift+Enter adds a
+  line) and, with **+**, extra `metadata` as a JSON object.
 
 A received ticket shows "Not linked yet" until you reply to it: until
 this system posts on a conversation, the bridge doesn't know its ticket
@@ -125,8 +133,11 @@ outbound payload.
 
 ```bash
 cd simulator
-uv run pytest -v
+uv run pytest --cov
 ```
+
+Coverage must stay at or above 80% (`simulator/pyproject.toml`), or CI
+fails.
 
 The bridge is faked at the httpx level; the webhook is called exactly as
 the bridge's dispatcher calls it.
