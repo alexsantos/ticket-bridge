@@ -489,7 +489,9 @@ mounted read-only into `/docker-entrypoint-initdb.d` - the official
 postgres image runs every `*.sql` file there, in filename order, against
 an empty data volume on first startup, so this reproduces section 3.2
 step 4 exactly (seed data included). Access is the same as section 3.2
-(frontend, Swagger docs, health check on `localhost:8080`).
+(frontend, Swagger docs, health check on `localhost:8080`). That happens
+only on first startup - migrations added by later versions have to be
+applied by hand, see section 3.6.2.
 
 `db` intentionally publishes no host port - it's reachable only from
 `app`, over the compose file's own `ticket-bridge` network, by service
@@ -546,7 +548,47 @@ slash) for that relative resolution to land on the right path.
 no proxy in front of it locally, so `ROOT_PATH` only matters for the
 containerized app (`docker run` - section 3.5 - or `docker compose`).
 
-#### 3.6.2. Troubleshooting
+#### 3.6.2. Upgrading an existing deployment
+
+Postgres runs `/docker-entrypoint-initdb.d` only when the `db_data`
+volume is empty, so a new version's migrations are **not** applied by
+`docker compose pull && docker compose up -d`. Check the release for new
+files in `migrations/` and apply each one, in order, **before** starting
+the new image - the previous app version keeps working against the
+migrated schema, but the new one may not work against the old schema.
+E.g. upgrading to 0.9.0 (`008_per_system_tls_verification.sql`):
+
+```bash
+# 1. Put the new migration file in ./migrations next to docker-compose.yml
+#    (git pull, or copy it from the repo)
+
+# 2. Apply it inside the db container (./migrations is mounted there)
+docker compose exec db psql -U ticketbridge -d ticketbridge \
+    -f /docker-entrypoint-initdb.d/008_per_system_tls_verification.sql
+
+# 3. Pull and start the new images
+docker compose pull
+docker compose up -d
+```
+
+Without a `./migrations` directory on the host, pipe the file in instead:
+
+```bash
+docker compose exec -T db psql -U ticketbridge -d ticketbridge \
+    < 008_per_system_tls_verification.sql
+```
+
+To confirm it applied (for 008):
+
+```bash
+docker compose exec db psql -U ticketbridge -d ticketbridge -c '\d systems' | grep verify_tls
+# verify_tls | boolean | not null default true
+```
+
+Don't put new migrations in place and then wipe the volume to "re-run
+init" - `docker compose down -v` deletes all data.
+
+#### 3.6.3. Troubleshooting
 
 **404s on every path, proxied requests still show the prefix in the
 logs** (`app` logs `GET /ticket-bridge/... 404`, or even
@@ -594,9 +636,8 @@ copying just `docker-compose.yml` (+ `.env`) to a server rather than the
 whole repo, `./migrations` won't exist there - and because that's a bind
 mount, Compose silently creates an *empty* directory for the missing
 source instead of erroring, so Postgres initializes with zero init
-scripts to run. Fix: copy this repo's `migrations/*.sql` files (all four:
-`001_initial_schema.sql`, `002_seed_example.sql`,
-`003_standardize_ticket_status.sql`, `004_unify_auth_mechanism.sql`) to
+scripts to run. Fix: copy all of this repo's `migrations/*.sql` files
+(`001_initial_schema.sql` through the latest) to
 that same path next to `docker-compose.yml` on the server, then wipe the
 already-initialized (but schema-less) volume and let it redo first-boot
 init:
