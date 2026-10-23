@@ -327,6 +327,7 @@ class OutboxEntryOut(BaseModel):
     destination: str
     source: str
     event: str | None
+    payload: dict[str, Any] = Field(description="The exact body POSTed to the destination.")
     status: OutboxStatus
     attempts: int
     max_attempts: int

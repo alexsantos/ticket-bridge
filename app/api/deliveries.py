@@ -6,7 +6,8 @@ GET  /api/v1/deliveries        - lists outbox entries page by page, with
 POST /api/v1/deliveries/retry  - puts the chosen 'failed' entries back in
                                  the queue.
 
-Feeds the frontend's "Deliveries" tab: an entry that used up its
+Feeds the frontend's "Deliveries" tab - each entry includes its full
+payload, the exact body sent to the destination. An entry that used up its
 max_attempts stays 'failed' until an admin decides to retry it - e.g.
 after fixing that system's configuration (URL, secret, verify_tls). Only
 the entries the admin picks are retried, never "every failed entry" -

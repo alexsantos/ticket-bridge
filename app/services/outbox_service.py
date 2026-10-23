@@ -123,8 +123,9 @@ async def list_entries(
     has_more), computed the same way as audit_service.list_recent (one
     extra row past `limit`, no COUNT(*)).
 
-    Each row carries the conversation's subject and the payload's `event`
-    (ticket.created / ticket.updated), not the full payload.
+    Each row carries the conversation's subject, the payload's `event`
+    (ticket.created / ticket.updated) and the full payload - exactly what
+    was (or will be) POSTed to the destination.
     """
     filters = []
     params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
@@ -142,7 +143,7 @@ async def list_entries(
         await cur.execute(
             f"""
             SELECT o.id, o.conversation_id, c.subject AS conversation_subject,
-                   o.destination, o.source, o.payload->>'event' AS event,
+                   o.destination, o.source, o.payload->>'event' AS event, o.payload,
                    o.status, o.attempts, o.max_attempts, o.last_error,
                    o.created_at, o.processed_at
             FROM outbox o

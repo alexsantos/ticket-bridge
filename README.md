@@ -938,6 +938,11 @@ defense-in-depth on top of the above, rather than the only mechanism.
   change what that system receives. Both are no-deploy configuration
   changes - unsubscribing takes effect immediately (see CLAUDE.md
   Decision 8).
+- **Seeing what was sent**: "Deliveries" tab, status *All*, filter by
+  destination - one row per message per destination; click a row for the
+  exact JSON body POSTed (or still to be POSTed) to that system. The
+  incoming message it came from is the "Audit" tab's `event_received`
+  entry.
 - **Diagnosing a failed delivery**: "Deliveries" tab (status *Failed*,
   filter by destination) shows each undelivered entry with its last
   error; the "Audit" tab's `delivery_failure` entries show every attempt.

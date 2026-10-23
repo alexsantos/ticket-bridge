@@ -16,7 +16,8 @@
         in app.js) - it is never shown or retrievable again afterward.
       - Topics: list/create/edit ticket categories/queues (e.g. INFRA, SPM, SALES).
       - Conversations: browse conversations and each participant's status.
-      - Deliveries: browse outbox entries, and pick failed ones to retry.
+      - Deliveries: browse outbox entries (click one for the exact payload
+        sent), and pick failed ones to retry.
       - Audit: browse the event log (audit_log).
 
     Requires an authenticated admin session - app.js's start() redirects
@@ -272,7 +273,7 @@
                 then stays <strong>failed</strong>. Once the cause is fixed (e.g. the system's URL,
                 secret or certificate setting), tick the ones to send again and click
                 <em>Retry selected</em>: they go back in the queue, unchanged, and are delivered on
-                the next sync (or <em>Sync now</em>).
+                the next sync (or <em>Sync now</em>). Click a row to see the exact payload sent.
             </p>
             <p id="deliveries-sync-result" class="hint sync-result" aria-live="polite" hidden></p>
             <table id="table-deliveries">
@@ -291,6 +292,20 @@
                 <button id="btn-deliveries-next" type="button">Next →</button>
             </div>
         </section>
+
+        <dialog id="dialog-delivery-payload">
+            <div class="delivery-payload">
+                <h3 id="delivery-payload-title"></h3>
+                <p id="delivery-payload-summary" class="hint"></p>
+                <pre><code id="delivery-payload-json"></code></pre>
+                <p id="delivery-payload-error" class="hint warning" hidden></p>
+                <p id="delivery-payload-copy-feedback" class="hint" aria-live="polite"></p>
+                <div class="dialog-actions">
+                    <button type="button" id="btn-copy-delivery-payload">Copy JSON</button>
+                    <button type="button" id="btn-close-delivery-payload" class="btn-primary">Close</button>
+                </div>
+            </div>
+        </dialog>
 
         <!-- ================= AUDIT ================= -->
         <section id="tab-audit" class="tab-panel">

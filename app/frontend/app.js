@@ -549,6 +549,10 @@ async function loadDeliveries() {
         // textContent: the error can quote the destination's response body.
         tr.querySelector(".delivery-error code").textContent = d.last_error ?? "—";
         tr.querySelector("input[type=checkbox]")?.addEventListener("change", updateRetrySelection);
+        // Clicking the row opens the payload; the checkbox cell only selects.
+        tr.addEventListener("click", (e) => {
+            if (!e.target.closest("td:first-child")) openDeliveryPayload(d);
+        });
         tbody.appendChild(tr);
     }
     updateRetrySelection();
@@ -580,6 +584,34 @@ deliveriesSelectAll.addEventListener("change", () => {
     });
     updateRetrySelection();
 });
+
+const deliveryPayloadDialog = document.getElementById("dialog-delivery-payload");
+
+// Shows the exact body that was (or will be) POSTed to the destination.
+// textContent throughout: the payload carries data sent by external systems.
+function openDeliveryPayload(d) {
+    document.getElementById("delivery-payload-title").textContent = `Delivery ${d.id}: ${d.source} → ${d.destination}`;
+    document.getElementById("delivery-payload-summary").textContent =
+        `${d.status} · ${d.attempts}/${d.max_attempts} attempts · queued ${formatDate(d.created_at)}`
+        + (d.processed_at ? ` · sent ${formatDate(d.processed_at)}` : "");
+    document.getElementById("delivery-payload-json").textContent = JSON.stringify(d.payload, null, 2);
+    const errorEl = document.getElementById("delivery-payload-error");
+    errorEl.textContent = d.last_error ? `Last error: ${d.last_error}` : "";
+    errorEl.hidden = !d.last_error;
+    document.getElementById("delivery-payload-copy-feedback").textContent = "";
+    deliveryPayloadDialog.showModal();
+}
+
+document.getElementById("btn-copy-delivery-payload").addEventListener("click", async () => {
+    const feedback = document.getElementById("delivery-payload-copy-feedback");
+    try {
+        await navigator.clipboard.writeText(document.getElementById("delivery-payload-json").textContent);
+        feedback.textContent = "Copied.";
+    } catch {
+        feedback.textContent = "Couldn't copy - select the text and copy it manually.";
+    }
+});
+document.getElementById("btn-close-delivery-payload").addEventListener("click", () => deliveryPayloadDialog.close());
 
 retryDeliveriesBtn.addEventListener("click", async () => {
     const ids = selectedDeliveryCheckboxes().map((cb) => Number(cb.value));
