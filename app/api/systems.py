@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Dep
 # so _row_to_system_out can split it into its non-secret parts - it is never
 # returned as-is (see SystemOut).
 _SELECT_SYSTEM_COLUMNS = """
-    s.code, s.name, s.base_url, s.active, s.auth_config,
+    s.code, s.name, s.base_url, s.verify_tls, s.active, s.auth_config,
     s.outbound_secret_encrypted IS NOT NULL AS has_secret,
     s.created_at, s.updated_at,
     COALESCE(
@@ -91,9 +91,9 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                     await cur.execute(
                         """
                         INSERT INTO systems
-                            (code, name, base_url, auth_config, active, outbound_secret_encrypted)
+                            (code, name, base_url, auth_config, verify_tls, active, outbound_secret_encrypted)
                         VALUES
-                            (%(code)s, %(name)s, %(base_url)s, %(auth_config)s, %(active)s,
+                            (%(code)s, %(name)s, %(base_url)s, %(auth_config)s, %(verify_tls)s, %(active)s,
                              %(outbound_secret_encrypted)s)
                         """,
                         values,
@@ -121,6 +121,7 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                 event_type="system_config_created",
                 detail={
                     "name": payload.name, "base_url": payload.base_url, "topics": payload.topics,
+                    "verify_tls": payload.verify_tls,
                     "outbound_secret_set": payload.outbound_secret is not None,
                 },
             )

@@ -23,6 +23,7 @@ class System(BaseModel):
     name: str
     base_url: str
     auth_config: dict[str, Any]
+    verify_tls: bool
     active: bool
     topics: list[str]
     created_at: datetime

@@ -9,7 +9,7 @@
 # data volume. That order (001_initial_schema, 002_seed_example,
 # 003_standardize_ticket_status, 004_unify_auth_mechanism,
 # 005_admin_authentication, 006_stored_outbound_secrets,
-# 007_retire_secret_ref) is exactly the
+# 007_retire_secret_ref, 008_per_system_tls_verification) is exactly the
 # sequence README.md section 3.2
 # has you run by hand, so `docker compose up` reproduces it automatically
 # - seed data (002) included, since this is a local/dev stack (005's

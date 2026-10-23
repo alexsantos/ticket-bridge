@@ -29,6 +29,7 @@ async def deliver(
     auth_config: dict[str, Any],
     payload: dict[str, Any],
     resolved_secret: str | None,
+    verify_tls: bool = True,
 ) -> None:
     """
     Sends the payload to the destination system.
@@ -45,6 +46,10 @@ async def deliver(
     `resolved_secret` is the system's already-decrypted outbound secret
     (see sync_service.resolve_outbound_secret) - the dispatcher never
     reads secrets itself, it only applies them.
+
+    `verify_tls=False` skips TLS certificate verification - only for a
+    destination serving a self-signed certificate, set per system
+    (systems.verify_tls, CLAUDE.md Decision 15).
     """
     settings = get_settings()
     headers = {"Content-Type": "application/json"}
@@ -55,7 +60,7 @@ async def deliver(
         headers[header_name] = f"{value_prefix}{resolved_secret}"
 
     try:
-        async with httpx.AsyncClient(timeout=settings.outbound_timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=settings.outbound_timeout_seconds, verify=verify_tls) as client:
             response = await client.post(base_url, json=payload, headers=headers)
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:

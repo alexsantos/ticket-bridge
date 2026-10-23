@@ -102,6 +102,13 @@
                             secret can't be decrypted, deliveries fail (and are retried) rather than being
                             sent without it.
                         </p>
+                        <label class="checkbox">
+                            <input type="checkbox" name="skip_tls_verify"> Accept a self-signed certificate (skip TLS verification)
+                        </label>
+                        <p class="hint">
+                            Only for a Base URL whose certificate isn't signed by a trusted authority.
+                            Deliveries to this system are then not protected against interception.
+                        </p>
                     </fieldset>
                     <p class="hint">
                         Status vocabulary and payload shape are fixed by the bridge for every

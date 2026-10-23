@@ -57,6 +57,7 @@ async def run_sync_batch() -> dict:
                         auth_config=destination_system["auth_config"],
                         payload=entry["payload"],
                         resolved_secret=resolve_outbound_secret(destination_system),
+                        verify_tls=destination_system["verify_tls"],
                     )
                 except DeliveryError as exc:
                     await outbox_service.mark_failed(conn, outbox_id=entry["id"], error=str(exc))
@@ -115,7 +116,7 @@ def resolve_outbound_secret(system: dict) -> str | None:
 async def _get_system_config(conn, code: str) -> dict | None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT code, base_url, auth_config, outbound_secret_encrypted, active "
+            "SELECT code, base_url, auth_config, outbound_secret_encrypted, verify_tls, active "
             "FROM systems WHERE code = %(code)s",
             {"code": code},
         )

@@ -163,6 +163,11 @@ class SystemCreate(BaseModel):
                     "'X-API-Key') and optional 'value_prefix' (e.g. 'Bearer ', for a "
                     "standard bearer token). See CLAUDE.md Decision 9.",
     )
+    verify_tls: bool = Field(
+        default=True,
+        description="Verify the TLS certificate of base_url. Set to false only for a "
+                    "destination with a self-signed certificate. See CLAUDE.md Decision 15.",
+    )
     active: bool = True
     topics: list[str] = Field(
         default_factory=list, description="Topic codes this system subscribes to."
@@ -180,6 +185,7 @@ class SystemUpdate(BaseModel):
     name: str | None = None
     base_url: str | None = None
     auth_config: dict[str, Any] | None = None
+    verify_tls: bool | None = None
     active: bool | None = None
     topics: list[str] | None = None
     outbound_secret: str | None = Field(
@@ -196,6 +202,7 @@ class SystemOut(BaseModel):
     code: str
     name: str
     base_url: str
+    verify_tls: bool
     active: bool
     topics: list[str]
     created_at: datetime

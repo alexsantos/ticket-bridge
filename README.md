@@ -277,7 +277,8 @@ ticket-bridge/
 │   ├── 004_unify_auth_mechanism.sql        # drops auth_type - one generic header-based auth mechanism
 │   ├── 005_admin_authentication.sql        # users/sessions tables + seeded default admin
 │   ├── 006_stored_outbound_secrets.sql     # encrypted outbound secret column on systems
-│   └── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
+│   ├── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
+│   └── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
 ├── tests/
 │   └── test_payload_builder.py
 ├── examples/
@@ -333,6 +334,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/004_unify_auth_mechanis
 psql "postgresql://localhost/ticketbridge" -f migrations/005_admin_authentication.sql  # seeds the default admin - see section 5
 psql "postgresql://localhost/ticketbridge" -f migrations/006_stored_outbound_secrets.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/007_retire_secret_ref.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/008_per_system_tls_verification.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -654,6 +656,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/006_stored_outbound_secrets.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/007_retire_secret_ref.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/008_per_system_tls_verification.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
@@ -809,6 +813,16 @@ Leave the secret empty for a system that doesn't check who calls it. If a
 stored secret can't be decrypted (e.g. `SECRETS_ENCRYPTION_KEY` changed),
 deliveries to that system fail — and are retried — with the reason in the
 audit log; they're never sent without the header.
+
+**Self-signed certificates**: if a system's Base URL uses HTTPS with a
+self-signed (or otherwise untrusted) certificate, deliveries fail with a
+`CERTIFICATE_VERIFY_FAILED` network error. Tick "Accept a self-signed
+certificate" in that system's dialog (API: `"verify_tls": false` on
+`POST`/`PATCH /api/v1/systems`) to skip verification for that system
+only; every other system keeps full verification (CLAUDE.md Decision 15).
+The connection is still encrypted, but no longer authenticated, so the
+outbound secret could be intercepted by anyone able to sit in the middle
+— prefer a certificate from a trusted (or internal) CA where possible.
 
 There's no built-in HTTP Basic Auth support — it needs a real
 `base64(username:password)` encoding step this project doesn't implement

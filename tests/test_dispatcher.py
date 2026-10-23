@@ -143,3 +143,29 @@ async def test_network_error_raises_delivery_error(monkeypatch):
             payload={},
             resolved_secret=None,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verify_tls", [True, False])
+async def test_verify_tls_is_passed_to_the_http_client(monkeypatch, verify_tls):
+    """systems.verify_tls=False (self-signed destination) must reach httpx as verify=False - CLAUDE.md Decision 15."""
+    captured = {}
+
+    class _RecordingAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            captured["verify"] = kwargs.get("verify", True)
+            kwargs.pop("verify", None)
+            kwargs["transport"] = httpx.MockTransport(lambda request: httpx.Response(200))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.services.dispatcher.httpx.AsyncClient", _RecordingAsyncClient)
+
+    await deliver(
+        base_url="https://destination.example/webhook",
+        auth_config={},
+        payload={},
+        resolved_secret=None,
+        verify_tls=verify_tls,
+    )
+
+    assert captured["verify"] is verify_tls

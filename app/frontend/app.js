@@ -170,7 +170,7 @@ async function loadSystems() {
         tr.innerHTML = `
             <td><code>${escapeHtml(s.code)}</code></td>
             <td>${escapeHtml(s.name)}</td>
-            <td>${escapeHtml(s.base_url)}</td>
+            <td>${escapeHtml(s.base_url)}${s.verify_tls === false ? ' <span class="badge inactive" title="TLS certificate not verified">no TLS verify</span>' : ""}</td>
             <td>${escapeHtml((s.topics || []).join(", ") || "—")}</td>
             <td><span class="badge ${s.active ? "active" : "inactive"}">${s.active ? "Active" : "Inactive"}</span></td>
             <td>${formatDate(s.updated_at)}</td>
@@ -217,6 +217,7 @@ function openSystemDialog(system) {
         systemForm.name.value = system.name;
         systemForm.base_url.value = system.base_url;
         systemForm.active.checked = system.active;
+        systemForm.skip_tls_verify.checked = system.verify_tls === false;
         systemForm.auth_header.value = system.auth_header ?? "";
         systemForm.auth_value_prefix.value = system.auth_value_prefix ?? "";
     }
@@ -277,6 +278,7 @@ systemForm.addEventListener("submit", async (e) => {
     const body = {
         name: data.get("name"),
         base_url: data.get("base_url"),
+        verify_tls: !systemForm.skip_tls_verify.checked,
         active: systemForm.active.checked,
         topics: topics,
     };

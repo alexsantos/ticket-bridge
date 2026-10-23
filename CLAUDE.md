@@ -562,6 +562,32 @@ must be recoverable to be sent (so it's encrypted). One value for both
 would let a leak on either side compromise both directions. README.md
 "Credentials at a glance" is the one-picture explanation of the result.
 
+## Decision 15 — Per-system opt-out of TLS verification, for self-signed destinations
+
+**Problem closed**: a destination system served its webhook over HTTPS
+with a self-signed certificate, so every delivery failed in httpx with
+`CERTIFICATE_VERIFY_FAILED` and there was no way around it short of
+changing that system's certificate.
+
+**Decision made** (`migrations/008_per_system_tls_verification.sql`):
+`systems.verify_tls` (default `TRUE`), passed straight to
+`httpx.AsyncClient(verify=...)` in `dispatcher.deliver()`. Set from the
+system's dialog ("Accept a self-signed certificate") or as `verify_tls`
+on `POST`/`PATCH /api/v1/systems`; the Systems table flags systems that
+have it off.
+
+- **Per system, not a global env flag**: one system's certificate problem
+  must not turn off verification for every other destination - and, like
+  the rest of a system's configuration (Decision 3), it's a frontend
+  operation, not an `.env` edit plus restart.
+- **Off, not pinned**: turning verification off still encrypts the
+  connection but no longer authenticates the destination, so the
+  outbound secret (Decision 13) can be intercepted by a man in the
+  middle. Accepted as an explicit, visible per-system choice for internal
+  networks. The safer extension point, if needed, is a per-system CA
+  bundle / pinned certificate (`verify=` also accepts an `ssl.SSLContext`
+  or a CA file path) - not done until there's a concrete need.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the
