@@ -25,7 +25,7 @@ should stay looked up locally via the ticket ref.
 **Where `note`/`insurance_number` come from**: nothing in the bridge
 defines these key names - they're documented on the `PATIENT_ADMIN`
 topic's own `description` field (seeded in `002_seed_example.sql`, also
-visible via `GET /api/v1/topics/PATIENT_ADMIN` or the "Topics" tab), which
+visible via `GET /api/v1/topics/PATIENT_ADMIN` or *Setup › Topics*), which
 is this project's convention for recording a topic's expected `metadata`
 shape. It's documentation, not validation - see README.md "Integration
 contract" and CLAUDE.md Decision 4.
@@ -273,8 +273,8 @@ commentary, if any, ride along with it.
 
 ### 5. Trigger sync and inspect the result
 
-In the admin panel: **Audit → ⇪ Sync now**, then look at the Conversations
-and Audit tabs. Or with curl, logged in as an admin (the session cookie
+In the admin panel: **Send pending now** (Overview or Deliveries), then
+open the conversation under *Conversations* to read it as a thread. Or with curl, logged in as an admin (the session cookie
 goes in a cookie jar):
 
 ```bash

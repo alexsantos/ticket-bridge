@@ -3,7 +3,8 @@
     login.html
     ----------
     Admin sign-in page. Static HTML + vanilla JS (login.js), same
-    no-build-step approach as index.html (CLAUDE.md Decision 7).
+    no-build-step approach as index.html (CLAUDE.md Decision 7), and the
+    same iOS-style look (style.css).
 
     app.js redirects here whenever GET api/v1/auth/me returns 401 - see
     its start() function. On successful login, login.js redirects back to
@@ -14,27 +15,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ticket Bridge — Sign in</title>
+    <meta name="color-scheme" content="light dark">
+    <title>Sign in – Ticket Bridge</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="login-page">
-    <div class="login-card">
-        <h1>Ticket Bridge</h1>
-        <p class="subtitle">Sign in to the configuration &amp; audit console</p>
-        <form id="form-login">
-            <label>Username
-                <input type="text" name="username" required autofocus>
-            </label>
-            <label>Password
-                <input type="password" name="password" required>
-            </label>
-            <p id="login-error" class="hint warning" hidden></p>
-            <div class="dialog-actions">
-                <button type="submit" class="btn-primary">Sign in</button>
+    <main class="login-card">
+        <div class="login-hero">
+            <img src="favicon.svg" alt="">
+            <h1>Ticket Bridge</h1>
+            <p>Sign in to manage systems and follow conversations.</p>
+        </div>
+        <form id="form-login" novalidate>
+            <p id="login-error" class="form-error" role="alert" hidden></p>
+            <div class="list form-list">
+                <label class="form-row">
+                    <span class="form-label">Username</span>
+                    <input type="text" name="username" required autofocus autocomplete="username" autocapitalize="off" spellcheck="false">
+                </label>
+                <label class="form-row">
+                    <span class="form-label">Password</span>
+                    <input type="password" name="password" required autocomplete="current-password">
+                </label>
             </div>
+            <button type="submit" class="btn btn-filled login-submit">Sign in</button>
         </form>
-    </div>
+    </main>
     <script src="login.js"></script>
 </body>
 </html>

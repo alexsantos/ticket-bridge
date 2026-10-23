@@ -10,22 +10,37 @@ const API_BASE = "api/v1";
 
 document.getElementById("form-login").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const data = new FormData(e.target);
+    const form = e.target;
+    const data = new FormData(form);
     const errorEl = document.getElementById("login-error");
+    const submit = form.querySelector("[type=submit]");
     errorEl.hidden = true;
 
+    if (!data.get("username") || !data.get("password")) {
+        errorEl.textContent = "Enter your username and password.";
+        errorEl.hidden = false;
+        return;
+    }
+
+    submit.disabled = true;
+    submit.textContent = "Signing in…";
     const resp = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: data.get("username"), password: data.get("password") }),
-    });
+    }).catch(() => null);
 
-    if (resp.ok) {
+    if (resp?.ok) {
         window.location.href = "."; // relative - respects a ROOT_PATH reverse-proxy prefix
         return;
     }
-    errorEl.textContent = resp.status === 429
-        ? "Too many failed attempts. Wait a few minutes and try again."
-        : "Invalid username or password.";
+    submit.disabled = false;
+    submit.textContent = "Sign in";
+    errorEl.textContent = !resp
+        ? "Can't reach the service. Check your connection and try again."
+        : resp.status === 429
+            ? "Too many failed attempts. Wait a few minutes, then try again."
+            : "That username and password don't match.";
     errorEl.hidden = false;
+    form.password.select();
 });

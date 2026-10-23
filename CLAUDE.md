@@ -618,6 +618,59 @@ back to `pending` with `attempts = 0`, and the normal sync delivers them.
 - **The reset clears `last_error`**, so the previous attempts and error
   are recorded in the audit log (`delivery_retry_requested`) first.
 
+*Amended by Decision 17: the frontend's Retry now also runs a sync right
+after requeueing, so a retry is delivered immediately. The API is
+unchanged - `POST .../retry` still only requeues.*
+
+## Decision 17 — Frontend organised around conversations, in Apple's idiom
+
+**Problem closed**: the admin panel was five tabs of tables. Rows that
+opened something looked exactly like rows that didn't (Deliveries'
+payload view was invisible until clicked), conversations couldn't be
+opened at all even though following one across systems is the main job,
+events were shown by their internal names (`delivery_retry_requested`,
+raw JSON), feedback mixed `alert()`, `confirm()` and hint lines far from
+the button, a failed topic save was silently ignored, and nothing told a
+new admin what to set up, in which order.
+
+**Decision made**: same no-build vanilla stack (Decision 7), rebuilt
+after Apple's Human Interface Guidelines, because its conventions are the
+ones most people already know for "this opens", "this edits", "this is
+destructive":
+
+- **Sections, not tabs**: Overview, Conversations, Deliveries, Setup
+  (Systems | Topics), Activity - a macOS-style sidebar that becomes an iOS
+  bottom tab bar on a phone. Hash routes (`#/conversations/<id>`,
+  `#/deliveries?status=failed`) so Back, reload and shared links work;
+  the hash never reaches the server, so a `ROOT_PATH` prefix is
+  unaffected.
+- **A conversation is a thread** - the signature view. Each
+  `event_received` audit row is a message bubble (status, the sender's
+  ticket ref, `metadata` as fields), paired with its deliveries through
+  the `outbox_ids` of the `fanout_scheduled` row written in the same
+  transaction, shown as receipts ("Delivered to …", "Couldn't deliver to
+  … - Retry"). This needed one API addition: `conversation_id` as a
+  filter on `GET /api/v1/deliveries`.
+- **Affordance rules**: every row that opens something has a chevron and
+  hover/pressed states; editing happens in sheets (Cancel / title /
+  Save); toggles are switches; destructive actions get an iOS-style alert;
+  results are toasts named after the action; every empty list says what
+  to do next.
+- **Attention is pushed, not hunted for**: a red badge on Deliveries
+  with the failed count, a banner on Overview, and a setup checklist
+  (topic → systems → subscriptions → keys) that disappears once complete.
+- **Retry sends immediately**: requeue, then `POST /api/v1/sync`, then
+  report what happened to those deliveries. Waiting for the next
+  scheduler run made "Retry" look like it did nothing.
+- **Plain language** for audit events, system and topic names instead of
+  codes wherever a name exists, and friendly text for the common errors
+  (e.g. a duplicate code).
+
+**Consciously not done**: no client-side framework or bundler; no
+pagination on the conversations list beyond the API's 200 most recent
+(client-side search over those); dark mode follows the OS only, with no
+in-app switch.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the

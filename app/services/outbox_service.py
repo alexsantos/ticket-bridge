@@ -114,6 +114,7 @@ async def list_entries(
     *,
     status: str | None = None,
     destination: str | None = None,
+    conversation_id: UUID | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[dict[str, Any]], bool]:
@@ -136,6 +137,9 @@ async def list_entries(
     if destination is not None:
         filters.append("o.destination = %(destination)s")
         params["destination"] = destination
+    if conversation_id is not None:
+        filters.append("o.conversation_id = %(conversation_id)s")
+        params["conversation_id"] = conversation_id
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
 

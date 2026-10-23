@@ -105,8 +105,8 @@ identical for every system, always:
   bridge only enforces the shape around it (`status`, the IDs), never the
   contents of `metadata` itself. Two systems on the same topic need to
   agree between themselves on what keys they expect to find here - **check
-  that topic's `description`** (`GET /api/v1/topics/{code}`, or the
-  "Topics" tab) first; that's the documented (not enforced) contract for
+  that topic's `description`** (`GET /api/v1/topics/{code}`, or
+  *Setup › Topics* in the admin panel) first; that's the documented (not enforced) contract for
   `metadata` on that topic. See CLAUDE.md Decision 4.
 
 ### Reporting your own ticket / status changes
@@ -164,8 +164,8 @@ flowchart LR
 | | Credential | Direction | Who creates it | Stored as | To rotate |
 |---|---|---|---|---|---|
 | ① | **Inbound API key** | system → bridge | The bridge generates it (Systems → system → *+ Generate key*), shown once; you hand it to that system's team | SHA-256 hash only | Generate a new one, then *Revoke* the old |
-| ② | **Outbound secret** | bridge → system | That system's team decides (whatever their webhook checks); you enter it in the system's dialog | Encrypted with ④ | Type the new value, *Save* |
-| ③ | **Admin password** | admin → admin panel | You (seeded as `admin` / `ChangeMe-Immediately!` - change it) | bcrypt hash | *Change password* in the footer |
+| ② | **Outbound secret** | bridge → system | That system's team decides (whatever their webhook checks); you enter it in the system's settings (*Setup › Systems*) | Encrypted with ④ | Type the new value, *Save* |
+| ③ | **Admin password** | admin → admin panel | You (seeded as `admin` / `ChangeMe-Immediately!` - change it) | bcrypt hash | *Account › Change password* |
 | ④ | **`SECRETS_ENCRYPTION_KEY`** | never sent anywhere | You, once per deployment, in `.env` | Only in the environment | Don't: changing it means re-entering every ② |
 
 **Why two per system instead of one shared secret?** They protect
@@ -187,8 +187,8 @@ carrying ②. (The simulator's Config tab is exactly this pair: "API key" is
 0.8.0 the environment only holds ④ (plus the database URL). The optional
 `SCHEDULER_SHARED_SECRET` is only for an external scheduler on Cloud Run
 that can't log in (section 4.6); on a VM, the in-process scheduler needs
-nothing, and admins trigger a manual sync with their session (*Audit →
-Sync now*).
+nothing, and admins trigger a manual sync with their session (*Send
+pending now* on the Overview or Deliveries screen).
 
 ---
 
@@ -422,8 +422,9 @@ curl -i -X POST http://localhost:8080/api/v1/auth/login \
 #  DELETE FROM audit_log WHERE event_type = 'admin_login_failed' AND detail->>'username' = 'admin';)
 ```
 Or just open http://localhost:8080/ in a browser — it should redirect to
-`login.html`; after signing in, the "Change password" and "Log out" links
-are in the footer.
+`login.html`; after signing in, *Change password* and *Log out* are in
+the account sheet (your name at the bottom of the sidebar, or the person
+icon on the Overview screen on a phone).
 
 ### 3.4. Automatic background sync
 
@@ -434,7 +435,7 @@ the same outbox-processing logic as `POST /api/v1/sync` every
 Cloud Scheduler is required. This is why the delivery in the example above
 happens automatically within about two minutes even if you never call
 `/api/v1/sync` yourself; to see it immediately, either lower
-`SYNC_INTERVAL_SECONDS` in `.env` or click **Audit → ⇪ Sync now** in the
+`SYNC_INTERVAL_SECONDS` in `.env` or click **Send pending now** in the
 admin panel (`POST /api/v1/sync` with the admin session; see
 `examples/README.md` step 5 for the curl equivalent).
 
@@ -810,24 +811,25 @@ gcloud scheduler jobs create http ticket-bridge-sync \
 ### 4.7. Registering the real systems
 
 After deployment, access the frontend at `${SERVICE_URL}/` (authenticated
-via IAM — see the next section) and create the real systems in the
-"Systems" tab.
+via IAM — see the next section) and create the real systems in *Setup ›
+Systems* (the Overview screen's checklist walks through the steps until
+every system has a topic and a key).
 
 Each system has two credentials, one per direction — see
 [Credentials at a glance](#credentials-at-a-glance) for the picture.
 
 **① Inbound API key** (the system → the bridge) — what *it* sends as
-`X-API-Key` on `POST /api/v1/events`. Generate one either from the
-"Systems" tab (open an already-saved system — a new, unsaved one has no
-`code` to attach a key to yet — and use the "Inbound API keys" section) or
-directly via the API:
+`X-API-Key` on `POST /api/v1/events`. Generate one either in *Setup ›
+Systems* (open an already-saved system — a new, unsaved one has no
+`code` to attach a key to yet — and use "Generate new key" under *Keys
+this system uses to send messages*) or directly via the API:
 
 ```
 POST /api/v1/systems/{code}/api-keys
 {"description": "System C - production key"}
 ```
 
-The response's `api_key` field — and the frontend's reveal dialog after
+The response's `api_key` field — and the frontend's *New key* sheet after
 generating one — is shown **once**: only its SHA-256 hash is stored
 (`api_keys` table), so it cannot be retrieved again afterward, in either
 place. Hand it to that system's team out-of-band. `GET
@@ -837,8 +839,8 @@ the "Revoke" button next to a key in the frontend) revokes one
 immediately.
 
 **② Outbound secret** (the bridge → the system) — what the bridge sends on
-every webhook delivery, in the "Bridge → this system" group of the
-system's dialog (API: `outbound_secret` / `clear_outbound_secret` on
+every webhook delivery, under *How the bridge signs in to this system*
+in the system's settings (API: `outbound_secret` / `clear_outbound_secret` on
 `POST`/`PATCH /api/v1/systems`). Use whatever value that system's webhook
 expects; it's stored encrypted and never shown again. It goes into one
 header, `auth_config.header` (defaults to `X-API-Key`), optionally
@@ -858,8 +860,8 @@ audit log; they're never sent without the header.
 
 **Self-signed certificates**: if a system's Base URL uses HTTPS with a
 self-signed (or otherwise untrusted) certificate, deliveries fail with a
-`CERTIFICATE_VERIFY_FAILED` network error. Tick "Accept a self-signed
-certificate" in that system's dialog (API: `"verify_tls": false` on
+`CERTIFICATE_VERIFY_FAILED` network error. Turn on "Accept a self-signed
+certificate" in that system's settings (API: `"verify_tls": false` on
 `POST`/`PATCH /api/v1/systems`) to skip verification for that system
 only; every other system keeps full verification (CLAUDE.md Decision 15).
 The connection is still encrypted, but no longer authenticated, so the
@@ -892,7 +894,7 @@ inbound API keys — see `migrations/005_admin_authentication.sql`) and
 expires after `SESSION_LIFETIME_HOURS` (default 12). The frontend
 (`app/frontend/app.js`) redirects to `login.html` whenever any API call
 returns 401 — on page load or mid-session, once the session expires or is
-revoked — and the footer has "Change password" and "Log out" links (`POST
+revoked — and the account sheet has *Change password* and *Log out* (`POST
 /api/v1/auth/change-password`, `POST /api/v1/auth/logout`). Changing the
 password also revokes every *other* active session of that user; the one
 used to make the change stays signed in.
@@ -913,14 +915,14 @@ the source at nginx.
 
 **Change this password immediately after your first login** — it's a
 known value in git history (same as this project's other seeded dev
-credentials), via the "Change password" link in the frontend footer or
+credentials), via *Account › Change password* in the frontend or
 `POST /api/v1/auth/change-password`.
 
 `POST /api/v1/events` (called by external systems) is **not** covered by
 admin sessions — it keeps its own per-system API key (credential ① in
 [Credentials at a glance](#credentials-at-a-glance)), since those are
 machine-to-machine callers, not human admins. `POST /api/v1/sync` accepts
-an admin session (*Audit → Sync now*), plus `SCHEDULER_SHARED_SECRET` only
+an admin session (*Send pending now* in the frontend), plus `SCHEDULER_SHARED_SECRET` only
 if you configured one for Cloud Scheduler (section 4.6).
 
 An external layer (Cloud Run IAP, an authenticated `gcloud run services
@@ -931,29 +933,36 @@ defense-in-depth on top of the above, rather than the only mechanism.
 
 ## 6. Day-to-day operation
 
-- **Adding a new system (e.g. a 3rd team)**: "Systems" tab in the frontend
-  → "New system". Requires no code deployment.
-- **Adding a new topic / changing subscriptions**: "Topics" tab to create a
-  category; check/uncheck it in a system's dialog on the "Systems" tab to
-  change what that system receives. Both are no-deploy configuration
+- **Following a conversation**: *Conversations*, then open one. It reads
+  as a thread: each message a system sent (status, its own ticket ref,
+  `metadata`), with a receipt per destination underneath - delivered,
+  waiting, or failed with an inline *Retry*. Select a receipt for the
+  exact payload.
+- **Adding a new system (e.g. a 3rd team)**: *Setup › Systems* → *Add
+  system*. Requires no code deployment. Until every system has a topic
+  and a key, the Overview screen lists what's missing.
+- **Adding a new topic / changing subscriptions**: *Setup › Topics* →
+  *Add topic*; turn it on or off under *Topics this system receives* in a
+  system's settings to change what that system receives. Both are no-deploy configuration
   changes - unsubscribing takes effect immediately (see CLAUDE.md
   Decision 8).
-- **Seeing what was sent**: "Deliveries" tab, status *All*, filter by
-  destination - one row per message per destination; click a row for the
-  exact JSON body POSTed (or still to be POSTed) to that system. The
-  incoming message it came from is the "Audit" tab's `event_received`
-  entry.
-- **Diagnosing a failed delivery**: "Deliveries" tab (status *Failed*,
-  filter by destination) shows each undelivered entry with its last
-  error; the "Audit" tab's `delivery_failure` entries show every attempt.
+- **Seeing what was sent**: *Deliveries* (status *All*, filter by
+  destination) - one row per message per destination; select a row for
+  the exact JSON body POSTed (or still to be POSTed) to that system, and
+  a link to its conversation.
+- **Diagnosing a failed delivery**: the red badge on *Deliveries* (and
+  the banner on Overview) counts failed ones. *Deliveries* with status
+  *Failed* shows each with its last error; *Activity* shows every attempt
+  (`delivery_failure`).
   An entry stays `pending` (retried on each sync) until `max_attempts`, at
   which point it becomes `failed` for manual intervention.
 - **Retrying failed deliveries**, once the cause is fixed (URL, secret,
-  certificate setting): in the "Deliveries" tab, tick the entries to send
-  again and click *Retry selected* (API: `POST /api/v1/deliveries/retry`
-  with `{"outbox_ids": [...]}`). They go back in the queue with their
-  original payload and attempts reset, and are delivered on the next sync
-  - or click *Sync now*. Only `failed` entries can be retried; the audit
+  certificate setting): in *Deliveries*, click *Select*, pick the failed
+  entries and click *Retry* - or use *Retry* on one delivery, in its
+  sheet or in the conversation thread (API: `POST /api/v1/deliveries/retry`
+  with `{"outbox_ids": [...]}`, then `POST /api/v1/sync`). They go back
+  in the queue with their original payload and attempts reset, and the
+  frontend sends them right away and reports what happened. Only `failed` entries can be retried; the audit
   log records each retry (`delivery_retry_requested`, with the previous
   error). Each payload's `event` was decided when it was queued, so if a
   system never received a conversation's first message, its follow-ups
@@ -1023,7 +1032,7 @@ to the published image.
   entries reach `status = 'failed'`.
 - Pagination on `GET /api/v1/conversations` for higher production volumes
   (`GET /api/v1/audit` already paginates - `limit`/`offset`, response
-  wrapped in `{items, limit, offset, has_more}`, see the "Audit" tab).
+  wrapped in `{items, limit, offset, has_more}`, see the Activity screen).
 - Webhook signature validation (HMAC) instead of just an API key, if any
   external system supports it.
 

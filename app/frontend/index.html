@@ -2,369 +2,535 @@
 <!--
     index.html
     ----------
-    Static frontend (HTML + vanilla JS, no build step) for Ticket Bridge
-    configuration and auditing. Deliberately simple: this project is an
-    internal integration service, not an end-user application, so a
-    framework/bundler isn't warranted.
+    Static frontend (HTML + vanilla JS, no build step - CLAUDE.md Decision 7)
+    for Ticket Bridge configuration and monitoring, styled after iOS /
+    macOS: a sidebar on wide screens that becomes a bottom tab bar on a
+    phone, inset grouped lists with a chevron on every row that opens
+    something, and sheets for editing.
 
-    Five tabs:
-      - Systems: list/create/edit federated systems and their topic subscriptions.
-        Editing an existing system also exposes its inbound API keys (the
-        credential it sends back as X-API-Key on POST /api/v1/events):
-        generate/revoke, with a Kibana-style one-time reveal dialog for a
-        newly generated key's plaintext value (see #dialog-api-key-reveal
-        in app.js) - it is never shown or retrievable again afterward.
-      - Topics: list/create/edit ticket categories/queues (e.g. INFRA, SPM, SALES).
-      - Conversations: browse conversations and each participant's status.
-      - Deliveries: browse outbox entries (click one for the exact payload
-        sent), and pick failed ones to retry.
-      - Audit: browse the event log (audit_log).
+    Sections (hash routes, so the browser's Back button and links work -
+    see router() in app.js):
+      - #/overview: what needs attention, a setup checklist until the
+        bridge is fully configured, recent conversations.
+      - #/conversations, #/conversations/<id>: browse conversations, and
+        read one as a thread - each message a system sent, with a delivery
+        receipt per destination (retry failed ones from there).
+      - #/deliveries: every message sent or waiting to be sent; open one
+        for its exact payload, select failed ones to retry.
+      - #/setup/systems, #/setup/topics: configuration. A system's sheet
+        also holds its inbound API keys (generate with a one-time reveal,
+        revoke) - see #sheet-api-key-reveal in app.js.
+      - #/activity: the audit log, in plain language.
 
     Requires an authenticated admin session - app.js's start() redirects
-    to login.html on a 401 from GET api/v1/auth/me. The footer has
+    to login.html on a 401 from GET api/v1/auth/me. The account sheet has
     "Change password" and "Log out" (see app/api/auth.py, CLAUDE.md
     Decision 11).
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ticket Bridge — Configuration and Audit</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <title>Ticket Bridge</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header>
-        <h1>Ticket Bridge</h1>
-        <p class="subtitle">Ticket correlation between support systems</p>
-    </header>
+    <!-- Icon set (SF Symbols-like line icons), referenced with <use href="#i-..."> -->
+    <svg xmlns="http://www.w3.org/2000/svg" hidden>
+        <symbol id="i-overview" viewBox="0 0 24 24"><path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/></symbol>
+        <symbol id="i-conversations" viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h8A2.5 2.5 0 0 1 17 6.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3.2A2.5 2.5 0 0 1 4 11.5z"/><path d="M17 9h.5A2.5 2.5 0 0 1 20 11.5v5a2.5 2.5 0 0 1-1.5 2.3V21l-3-2.5H12a2.5 2.5 0 0 1-2.3-1.5"/></symbol>
+        <symbol id="i-deliveries" viewBox="0 0 24 24"><path d="M20.5 3.5 3.5 10.6l6.4 2.6 2.7 6.3z"/><path d="m20.5 3.5-10.6 9.7"/></symbol>
+        <symbol id="i-setup" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+        <symbol id="i-back" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 5v4h-4"/></symbol>
+        <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V6M6.5 11 12 5.5l5.5 5.5"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12.5 4 4 9-9"/></symbol>
+        <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.2 12.2 2.6 2.6 5-5"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 21 19.5H3z"/><path d="M12 10v4M12 16.8v.2"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H20M17 12v3M20 12v2"/></symbol>
+        <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5a7 7 0 0 1 14 0"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m15.5 15.5 4 4"/></symbol>
+        <symbol id="i-retry" viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2.05-4.95"/><path d="M5 5v4h4"/></symbol>
+        <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/></symbol>
+        <symbol id="i-tag" viewBox="0 0 24 24"><path d="M4 4h7l9 9-7 7-9-9z"/><circle cx="8.5" cy="8.5" r="1.3"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+    </svg>
 
-    <nav class="tabs">
-        <button class="tab-btn active" data-tab="systems">Systems</button>
-        <button class="tab-btn" data-tab="topics">Topics</button>
-        <button class="tab-btn" data-tab="conversations">Conversations</button>
-        <button class="tab-btn" data-tab="deliveries">Deliveries</button>
-        <button class="tab-btn" data-tab="audit">Audit</button>
-    </nav>
-
-    <main>
-        <!-- ================= SYSTEMS ================= -->
-        <section id="tab-systems" class="tab-panel active">
-            <div class="panel-header">
-                <h2>Federated Systems</h2>
-                <div class="panel-actions">
-                    <button type="button" class="btn-refresh" data-refresh="systems" title="Reload this section's data">↻ Refresh</button>
-                    <button id="btn-new-system" class="btn-primary">+ New system</button>
-                </div>
+    <div class="app">
+        <!-- Sidebar on wide screens, bottom tab bar on a phone -->
+        <nav class="sidebar" aria-label="Sections">
+            <div class="sidebar-brand">
+                <img src="favicon.svg" alt="" width="28" height="28">
+                <span>Ticket Bridge</span>
             </div>
-            <table id="table-systems">
-                <thead>
-                    <tr>
-                        <th>Code</th><th>Name</th><th>Base URL</th>
-                        <th>Topics</th><th>Active</th><th>Updated</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
+            <a class="nav-item" href="#/overview" data-section="overview">
+                <svg class="icon"><use href="#i-overview"/></svg><span>Overview</span>
+            </a>
+            <a class="nav-item" href="#/conversations" data-section="conversations">
+                <svg class="icon"><use href="#i-conversations"/></svg><span>Conversations</span>
+            </a>
+            <a class="nav-item" href="#/deliveries" data-section="deliveries">
+                <svg class="icon"><use href="#i-deliveries"/></svg><span>Deliveries</span>
+                <span class="nav-badge" id="nav-badge-failed" hidden></span>
+            </a>
+            <a class="nav-item" href="#/setup/systems" data-section="setup">
+                <svg class="icon"><use href="#i-setup"/></svg><span>Setup</span>
+            </a>
+            <a class="nav-item" href="#/activity" data-section="activity">
+                <svg class="icon"><use href="#i-activity"/></svg><span>Activity</span>
+            </a>
+            <button type="button" class="sidebar-account" id="btn-account">
+                <span class="avatar avatar-small" aria-hidden="true"><svg class="icon"><use href="#i-person"/></svg></span>
+                <span class="sidebar-account-text">
+                    <span class="sidebar-account-name" id="current-username">…</span>
+                    <span class="sidebar-account-hint">Account</span>
+                </span>
+            </button>
+        </nav>
 
-            <dialog id="dialog-system">
-                <form id="form-system" method="dialog">
-                    <h3>System configuration</h3>
-                    <label>Code (immutable after creation)
-                        <input type="text" name="code" required placeholder="e.g. system_c">
+        <main class="content" id="content">
+            <p class="offline-banner" id="offline-banner" hidden>
+                Can't reach the service. Check that it's running, then reload this page.
+            </p>
+
+            <!-- ================= OVERVIEW ================= -->
+            <section class="view" id="view-overview" data-section="overview" hidden>
+                <header class="view-header">
+                    <h1 class="large-title">Overview</h1>
+                    <div class="toolbar">
+                        <button type="button" class="tool-btn" data-action="sync" title="Send everything that's waiting, without waiting for the next automatic run">
+                            <svg class="icon"><use href="#i-send"/></svg><span>Send pending now</span>
+                        </button>
+                        <button type="button" class="tool-btn icon-only mobile-only" data-action="account" aria-label="Account">
+                            <svg class="icon"><use href="#i-person"/></svg>
+                        </button>
+                    </div>
+                </header>
+
+                <div id="overview-attention"></div>
+
+                <section class="group" id="overview-setup" hidden>
+                    <h2 class="group-title">Finish setting up</h2>
+                    <ol class="list setup-steps" id="overview-setup-steps"></ol>
+                    <p class="group-footer">Each system needs a topic to share, a subscription to it, and a key to send messages with. This list disappears once everything's in place.</p>
+                </section>
+
+                <section class="group">
+                    <h2 class="group-title">Deliveries</h2>
+                    <div class="list" id="overview-deliveries"></div>
+                </section>
+
+                <section class="group">
+                    <div class="group-title-row">
+                        <h2 class="group-title">Recent conversations</h2>
+                        <a class="group-link" href="#/conversations">See all</a>
+                    </div>
+                    <div class="list" id="overview-conversations"></div>
+                </section>
+            </section>
+
+            <!-- ================= CONVERSATIONS ================= -->
+            <section class="view" id="view-conversations" data-section="conversations" hidden>
+                <header class="view-header">
+                    <h1 class="large-title">Conversations</h1>
+                    <div class="toolbar">
+                        <button type="button" class="tool-btn icon-only" data-action="refresh" aria-label="Refresh" title="Refresh">
+                            <svg class="icon"><use href="#i-refresh"/></svg>
+                        </button>
+                    </div>
+                </header>
+                <div class="filter-bar">
+                    <label class="search-field">
+                        <svg class="icon"><use href="#i-search"/></svg>
+                        <input type="search" id="conversations-search" placeholder="Search subject or ticket reference" aria-label="Search conversations">
                     </label>
-                    <label>Name
-                        <input type="text" name="name" required placeholder="e.g. Team X Helpdesk">
+                    <label class="popup-button">
+                        <span class="visually-hidden">System</span>
+                        <select id="filter-conversations-system"><option value="">All systems</option></select>
                     </label>
-                    <label>Base URL (system's webhook endpoint)
-                        <input type="url" name="base_url" required placeholder="https://.../webhook">
+                    <label class="popup-button">
+                        <span class="visually-hidden">Topic</span>
+                        <select id="filter-conversations-topic"><option value="">All topics</option></select>
                     </label>
-                    <fieldset class="auth-fieldset">
-                        <legend>Bridge → this system (how the bridge authenticates to its Base URL)</legend>
-                        <p id="legacy-secret-ref-warning" class="hint warning" hidden>
-                            This system still uses a secret reference from an older version, which is no
-                            longer supported: deliveries to it fail until you set its secret below, or tick
-                            "Send without a secret" if it doesn't need one.
-                        </p>
-                        <label>Header name (optional - defaults to X-API-Key)
-                            <input type="text" name="auth_header" placeholder="e.g. X-API-Key or Authorization">
+                </div>
+                <div class="list" id="list-conversations"></div>
+                <p class="group-footer" id="conversations-footer"></p>
+            </section>
+
+            <!-- ================= CONVERSATION DETAIL ================= -->
+            <section class="view" id="view-conversation" data-section="conversations" hidden>
+                <header class="nav-header">
+                    <a class="back-link" href="#/conversations"><svg class="icon"><use href="#i-back"/></svg>Conversations</a>
+                    <div class="toolbar">
+                        <a class="tool-btn" id="conversation-activity-link" href="#/activity">See in Activity</a>
+                        <button type="button" class="tool-btn icon-only" data-action="refresh" aria-label="Refresh" title="Refresh">
+                            <svg class="icon"><use href="#i-refresh"/></svg>
+                        </button>
+                    </div>
+                </header>
+                <div id="conversation-detail"></div>
+            </section>
+
+            <!-- ================= DELIVERIES ================= -->
+            <section class="view" id="view-deliveries" data-section="deliveries" hidden>
+                <header class="view-header">
+                    <h1 class="large-title">Deliveries</h1>
+                    <div class="toolbar">
+                        <button type="button" class="tool-btn" id="btn-select-deliveries" hidden>Select</button>
+                        <button type="button" class="tool-btn" data-action="sync" title="Send everything that's waiting, without waiting for the next automatic run">
+                            <svg class="icon"><use href="#i-send"/></svg><span>Send pending now</span>
+                        </button>
+                        <button type="button" class="tool-btn icon-only" data-action="refresh" aria-label="Refresh" title="Refresh">
+                            <svg class="icon"><use href="#i-refresh"/></svg>
+                        </button>
+                    </div>
+                </header>
+                <div class="filter-bar">
+                    <div class="segmented" role="radiogroup" aria-label="Status" id="deliveries-status">
+                        <button type="button" role="radio" data-value="failed">Failed</button>
+                        <button type="button" role="radio" data-value="pending">Waiting</button>
+                        <button type="button" role="radio" data-value="sent">Sent</button>
+                        <button type="button" role="radio" data-value="">All</button>
+                    </div>
+                    <label class="popup-button">
+                        <span class="visually-hidden">Destination</span>
+                        <select id="filter-deliveries-system"><option value="">All destinations</option></select>
+                    </label>
+                </div>
+                <div class="list" id="list-deliveries"></div>
+                <div class="load-more-row"><button type="button" class="text-btn" id="btn-deliveries-more" hidden>Show more</button></div>
+                <p class="group-footer" id="deliveries-footer"></p>
+
+                <!-- Shown in selection mode (iOS Mail/Photos pattern) -->
+                <div class="action-bar" id="deliveries-action-bar" hidden>
+                    <button type="button" class="text-btn" id="btn-deliveries-select-all">Select all</button>
+                    <span class="action-bar-count" id="deliveries-selected-count">None selected</span>
+                    <div class="action-bar-end">
+                        <button type="button" class="text-btn" id="btn-deliveries-cancel-select">Cancel</button>
+                        <button type="button" class="btn btn-filled" id="btn-retry-deliveries" disabled>Retry</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= SETUP ================= -->
+            <section class="view" id="view-setup" data-section="setup" hidden>
+                <header class="view-header">
+                    <h1 class="large-title">Setup</h1>
+                    <div class="toolbar">
+                        <button type="button" class="tool-btn icon-only" data-action="refresh" aria-label="Refresh" title="Refresh">
+                            <svg class="icon"><use href="#i-refresh"/></svg>
+                        </button>
+                        <button type="button" class="tool-btn tool-btn-prominent" id="btn-setup-add">
+                            <svg class="icon"><use href="#i-plus"/></svg><span id="btn-setup-add-label">Add system</span>
+                        </button>
+                    </div>
+                </header>
+                <div class="filter-bar">
+                    <nav class="segmented" aria-label="Setup sections">
+                        <a href="#/setup/systems" data-value="systems">Systems</a>
+                        <a href="#/setup/topics" data-value="topics">Topics</a>
+                    </nav>
+                </div>
+                <div id="setup-systems">
+                    <div class="list" id="list-systems"></div>
+                    <p class="group-footer">A system is one team's support application. The bridge sends it messages on the topics it subscribes to, and accepts messages from it with its own key.</p>
+                </div>
+                <div id="setup-topics" hidden>
+                    <div class="list" id="list-topics"></div>
+                    <p class="group-footer">A topic is a kind of work, like Infrastructure or Patient admin. Every conversation belongs to one, and goes to every system subscribed to it.</p>
+                </div>
+            </section>
+
+            <!-- ================= ACTIVITY ================= -->
+            <section class="view" id="view-activity" data-section="activity" hidden>
+                <header class="view-header">
+                    <h1 class="large-title">Activity</h1>
+                    <div class="toolbar">
+                        <button type="button" class="tool-btn icon-only" data-action="refresh" aria-label="Refresh" title="Refresh">
+                            <svg class="icon"><use href="#i-refresh"/></svg>
+                        </button>
+                    </div>
+                </header>
+                <div class="filter-bar">
+                    <label class="popup-button">
+                        <span class="visually-hidden">System</span>
+                        <select id="filter-activity-system"><option value="">All systems</option></select>
+                    </label>
+                    <span class="filter-chip" id="activity-conversation-chip" hidden>
+                        <span id="activity-conversation-label"></span>
+                        <a href="#/activity" aria-label="Show all activity">✕</a>
+                    </span>
+                </div>
+                <div class="list" id="list-activity"></div>
+                <div class="load-more-row"><button type="button" class="text-btn" id="btn-activity-more" hidden>Show more</button></div>
+                <p class="group-footer">Everything the bridge did, newest first. Select an entry to see its details.</p>
+            </section>
+        </main>
+    </div>
+
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+
+    <!-- ================= SHEETS ================= -->
+    <!-- System -->
+    <dialog class="sheet sheet-wide" id="sheet-system" aria-labelledby="sheet-system-title">
+        <form id="form-system" novalidate>
+            <header class="sheet-bar">
+                <button type="button" class="text-btn" data-close>Cancel</button>
+                <h2 id="sheet-system-title">New system</h2>
+                <button type="submit" class="text-btn text-btn-strong">Save</button>
+            </header>
+            <div class="sheet-body">
+                <p class="form-error" id="system-form-error" role="alert" hidden></p>
+
+                <section class="group">
+                    <div class="list form-list">
+                        <label class="form-row">
+                            <span class="form-label">Name</span>
+                            <input type="text" name="name" required placeholder="Required">
                         </label>
-                        <label>Value prefix (optional - e.g. "Bearer " with a trailing space, for a standard bearer token)
-                            <input type="text" name="auth_value_prefix" placeholder="e.g. Bearer ">
+                        <label class="form-row">
+                            <span class="form-label">Code</span>
+                            <input type="text" name="code" required placeholder="Required, e.g. team_x" autocapitalize="off" spellcheck="false">
                         </label>
-                        <label>Secret (the value this system expects in that header - stored encrypted, never shown again)
+                        <label class="form-row form-row-switch">
+                            <span class="form-label">Active</span>
+                            <input type="checkbox" class="switch" name="active" checked>
+                        </label>
+                    </div>
+                    <p class="group-footer" id="system-code-footer">The code identifies this system in the API and can't be changed later. An inactive system doesn't receive messages.</p>
+                </section>
+
+                <section class="group">
+                    <h3 class="group-title">Where the bridge sends messages</h3>
+                    <div class="list form-list">
+                        <label class="form-row form-row-stacked">
+                            <span class="form-label">Webhook URL</span>
+                            <input type="url" name="base_url" required placeholder="Required, e.g. https://helpdesk.example.org/webhook" autocapitalize="off" spellcheck="false">
+                        </label>
+                        <label class="form-row form-row-switch">
+                            <span class="form-label">Accept a self-signed certificate</span>
+                            <input type="checkbox" class="switch" name="skip_tls_verify">
+                        </label>
+                    </div>
+                    <p class="group-footer">Only turn this on if the webhook uses HTTPS with a certificate no trusted authority signed. The connection stays encrypted, but the bridge can't confirm who it's talking to.</p>
+                </section>
+
+                <section class="group">
+                    <h3 class="group-title">How the bridge signs in to this system</h3>
+                    <p class="inline-warning" id="legacy-secret-ref-warning" hidden>
+                        <svg class="icon"><use href="#i-alert"/></svg>
+                        <span>This system still points to a secret from an older version. Messages to it fail until you enter its secret below, or turn on "Send without a secret".</span>
+                    </p>
+                    <div class="list form-list">
+                        <label class="form-row form-row-stacked">
+                            <span class="form-label">Secret</span>
                             <input type="password" name="outbound_secret" autocomplete="new-password">
                         </label>
-                        <div id="clear-outbound-secret-field" hidden>
-                            <label class="checkbox">
-                                <input type="checkbox" id="clear-outbound-secret-checkbox"> <span id="clear-outbound-secret-label">Remove stored secret</span>
-                            </label>
-                        </div>
-                        <p class="hint">
-                            Leave the secret empty if this system doesn't check who calls it. If a stored
-                            secret can't be decrypted, deliveries fail (and are retried) rather than being
-                            sent without it.
-                        </p>
-                        <label class="checkbox">
-                            <input type="checkbox" name="skip_tls_verify"> Accept a self-signed certificate (skip TLS verification)
+                        <label class="form-row form-row-switch" id="clear-outbound-secret-field" hidden>
+                            <span class="form-label" id="clear-outbound-secret-label">Remove stored secret</span>
+                            <input type="checkbox" class="switch" id="clear-outbound-secret-checkbox">
                         </label>
-                        <p class="hint">
-                            Only for a Base URL whose certificate isn't signed by a trusted authority.
-                            Deliveries to this system are then not protected against interception.
-                        </p>
-                    </fieldset>
-                    <p class="hint">
-                        Status vocabulary and payload shape are fixed by the bridge for every
-                        system - see the "Integration contract" section in README.md. There's
-                        nothing to configure here.
-                    </p>
-                    <fieldset id="system-topics-fieldset">
-                        <legend>Subscribed topics (receives every ticket/update for these)</legend>
-                        <div id="system-topics-checkboxes"></div>
-                    </fieldset>
-                    <label class="checkbox">
-                        <input type="checkbox" name="active" checked> Active
-                    </label>
-                    <p id="system-form-error" class="hint warning" hidden></p>
-                    <div class="dialog-actions">
-                        <button type="button" id="btn-cancel-system">Cancel</button>
-                        <button type="submit" class="btn-primary">Save</button>
+                        <label class="form-row">
+                            <span class="form-label">Header</span>
+                            <input type="text" name="auth_header" placeholder="X-API-Key" autocapitalize="off" spellcheck="false">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">Value prefix</span>
+                            <input type="text" name="auth_value_prefix" placeholder="None" autocapitalize="off" spellcheck="false">
+                        </label>
                     </div>
-                </form>
+                    <p class="group-footer">The value this system expects with each message. It's stored encrypted and never shown again. Leave it empty if the system doesn't check. For a bearer token, use header <code>Authorization</code> and prefix <code>Bearer&nbsp;</code> (with a trailing space).</p>
+                </section>
 
-                <!-- Only shown when editing an existing system - a new
-                     system has no code to attach keys to until saved. -->
-                <div id="system-api-keys-section" class="dialog-section" hidden>
-                    <h4>This system → bridge: inbound API keys</h4>
-                    <p class="hint">
-                        What this system sends as <code>X-API-Key</code> on <code>POST /api/v1/events</code>.
-                        A key's value is shown only once, right after it's generated -
-                        only its hash is stored, so it can never be retrieved again.
-                    </p>
-                    <table id="table-api-keys">
-                        <thead>
-                            <tr><th>Description</th><th>Status</th><th>Created</th><th></th></tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                    <form id="form-api-key-generate" class="inline-form">
-                        <input type="text" id="new-api-key-description" placeholder="Description (e.g. Production key)">
-                        <button type="submit" class="btn-primary">+ Generate key</button>
-                    </form>
-                </div>
-            </dialog>
+                <section class="group">
+                    <h3 class="group-title">Topics this system receives</h3>
+                    <div class="list form-list" id="system-topics"></div>
+                    <p class="group-footer">The system gets every new conversation and update on these topics, and can only start conversations on them.</p>
+                </section>
 
-            <dialog id="dialog-api-key-reveal">
-                <div class="api-key-reveal">
-                    <h3>API key generated</h3>
-                    <p class="hint warning">
-                        Copy this key now and send it to the system's team - it will not
-                        be shown again.
-                    </p>
-                    <div class="api-key-value-row">
-                        <input type="text" id="api-key-reveal-value" readonly>
-                        <button type="button" id="btn-copy-api-key">Copy</button>
+                <!-- Only when editing: keys need a saved system to belong to -->
+                <section class="group" id="system-api-keys-section" hidden>
+                    <h3 class="group-title">Keys this system uses to send messages</h3>
+                    <div class="list" id="list-api-keys"></div>
+                    <div class="list form-list key-generate">
+                        <label class="form-row">
+                            <span class="visually-hidden">New key description</span>
+                            <input type="text" id="new-api-key-description" placeholder="Description, e.g. Production">
+                        </label>
+                        <button type="button" class="list-button" id="btn-generate-api-key">
+                            <svg class="icon"><use href="#i-key"/></svg>Generate new key
+                        </button>
                     </div>
-                    <p id="api-key-copy-feedback" class="hint" aria-live="polite"></p>
-                    <div class="dialog-actions">
-                        <button type="button" id="btn-close-api-key-reveal" class="btn-primary">Done</button>
-                    </div>
-                </div>
-            </dialog>
-        </section>
-
-        <!-- ================= TOPICS ================= -->
-        <section id="tab-topics" class="tab-panel">
-            <div class="panel-header">
-                <h2>Topics</h2>
-                <div class="panel-actions">
-                    <button type="button" class="btn-refresh" data-refresh="topics" title="Reload this section's data">↻ Refresh</button>
-                    <button id="btn-new-topic" class="btn-primary">+ New topic</button>
-                </div>
-            </div>
-            <table id="table-topics">
-                <thead>
-                    <tr>
-                        <th>Code</th><th>Name</th><th>Description</th><th>Active</th><th>Updated</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-
-            <dialog id="dialog-topic">
-                <form id="form-topic" method="dialog">
-                    <h3>Topic configuration</h3>
-                    <label>Code (immutable after creation)
-                        <input type="text" name="code" required placeholder="e.g. INFRA">
-                    </label>
-                    <label>Name
-                        <input type="text" name="name" required placeholder="e.g. Infrastructure">
-                    </label>
-                    <label>Description (also document expected `metadata` keys for
-                        events on this topic here - see README.md "Integration contract";
-                        the bridge does not enforce this, it's for integrating teams)
-                        <input type="text" name="description" placeholder="e.g. Expected metadata: note (string), insurance_number (string)">
-                    </label>
-                    <label class="checkbox">
-                        <input type="checkbox" name="active" checked> Active
-                    </label>
-                    <div class="dialog-actions">
-                        <button type="button" id="btn-cancel-topic">Cancel</button>
-                        <button type="submit" class="btn-primary">Save</button>
-                    </div>
-                </form>
-            </dialog>
-        </section>
-
-        <!-- ================= CONVERSATIONS ================= -->
-        <section id="tab-conversations" class="tab-panel">
-            <div class="panel-header">
-                <h2>Conversations</h2>
-                <div class="panel-actions">
-                    <label>Filter by system:
-                        <select id="filter-conversations-system">
-                            <option value="">All</option>
-                        </select>
-                    </label>
-                    <label>Filter by topic:
-                        <select id="filter-conversations-topic">
-                            <option value="">All</option>
-                        </select>
-                    </label>
-                    <button type="button" class="btn-refresh" data-refresh="conversations" title="Reload this section's data">↻ Refresh</button>
-                </div>
-            </div>
-            <table id="table-conversations">
-                <thead>
-                    <tr>
-                        <th>ID</th><th>Subject</th><th>Topic</th><th>Overall status</th>
-                        <th>Participants</th><th>Updated</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </section>
-
-        <!-- ================= DELIVERIES ================= -->
-        <section id="tab-deliveries" class="tab-panel">
-            <div class="panel-header">
-                <h2>Deliveries</h2>
-                <div class="panel-actions">
-                    <label>Status:
-                        <select id="filter-deliveries-status">
-                            <option value="failed" selected>Failed</option>
-                            <option value="pending">Pending</option>
-                            <option value="sent">Sent</option>
-                            <option value="">All</option>
-                        </select>
-                    </label>
-                    <label>Destination:
-                        <select id="filter-deliveries-system">
-                            <option value="">All</option>
-                        </select>
-                    </label>
-                    <button type="button" class="btn-refresh" data-refresh="deliveries" title="Reload this section's data">↻ Refresh</button>
-                    <button type="button" class="btn-refresh btn-sync-now" data-result="deliveries-sync-result" title="Deliver pending outbox entries now instead of waiting for the scheduler">⇪ Sync now</button>
-                    <button type="button" id="btn-retry-deliveries" class="btn-primary" disabled>Retry selected</button>
-                </div>
-            </div>
-            <p class="hint">
-                A delivery that fails is retried on each sync until it reaches its maximum attempts,
-                then stays <strong>failed</strong>. Once the cause is fixed (e.g. the system's URL,
-                secret or certificate setting), tick the ones to send again and click
-                <em>Retry selected</em>: they go back in the queue, unchanged, and are delivered on
-                the next sync (or <em>Sync now</em>). Click a row to see the exact payload sent.
-            </p>
-            <p id="deliveries-sync-result" class="hint sync-result" aria-live="polite" hidden></p>
-            <table id="table-deliveries">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="deliveries-select-all" title="Select all failed deliveries on this page"></th>
-                        <th>ID</th><th>Created</th><th>Destination</th><th>Source</th>
-                        <th>Conversation</th><th>Event</th><th>Status</th><th>Attempts</th><th>Last error</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-            <div class="pagination">
-                <button id="btn-deliveries-prev" type="button">← Previous</button>
-                <span id="deliveries-page-label"></span>
-                <button id="btn-deliveries-next" type="button">Next →</button>
-            </div>
-        </section>
-
-        <dialog id="dialog-delivery-payload">
-            <div class="delivery-payload">
-                <h3 id="delivery-payload-title"></h3>
-                <p id="delivery-payload-summary" class="hint"></p>
-                <pre><code id="delivery-payload-json"></code></pre>
-                <p id="delivery-payload-error" class="hint warning" hidden></p>
-                <p id="delivery-payload-copy-feedback" class="hint" aria-live="polite"></p>
-                <div class="dialog-actions">
-                    <button type="button" id="btn-copy-delivery-payload">Copy JSON</button>
-                    <button type="button" id="btn-close-delivery-payload" class="btn-primary">Close</button>
-                </div>
-            </div>
-        </dialog>
-
-        <!-- ================= AUDIT ================= -->
-        <section id="tab-audit" class="tab-panel">
-            <div class="panel-header">
-                <h2>Audit Log</h2>
-                <div class="panel-actions">
-                    <label>Filter by system:
-                        <select id="filter-audit-system">
-                            <option value="">All</option>
-                        </select>
-                    </label>
-                    <button type="button" class="btn-refresh" data-refresh="audit" title="Reload this section's data">↻ Refresh</button>
-                    <button type="button" class="btn-refresh btn-sync-now" data-result="sync-result" title="Deliver pending outbox entries now instead of waiting for the scheduler">⇪ Sync now</button>
-                </div>
-            </div>
-            <p id="sync-result" class="hint sync-result" aria-live="polite" hidden></p>
-            <table id="table-audit">
-                <thead>
-                    <tr>
-                        <th>Date/Time</th><th>Event type</th><th>System</th>
-                        <th>Conversation</th><th>Detail</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-            <div class="pagination">
-                <button id="btn-audit-prev" type="button">← Previous</button>
-                <span id="audit-page-label"></span>
-                <button id="btn-audit-next" type="button">Next →</button>
-            </div>
-        </section>
-    </main>
-
-    <dialog id="dialog-change-password">
-        <form id="form-change-password">
-            <h3>Change password</h3>
-            <label>Current password
-                <input type="password" name="current_password" required>
-            </label>
-            <label>New password
-                <input type="password" name="new_password" required minlength="8">
-            </label>
-            <label>Confirm new password
-                <input type="password" name="new_password_confirm" required minlength="8">
-            </label>
-            <p id="change-password-error" class="hint warning" hidden></p>
-            <div class="dialog-actions">
-                <button type="button" id="btn-cancel-change-password">Cancel</button>
-                <button type="submit" class="btn-primary">Change password</button>
+                    <p class="group-footer">Sent by this system as <code>X-API-Key</code> on <code>POST /api/v1/events</code>. A new key is shown once, right after it's generated. Hand it to the system's team.</p>
+                </section>
             </div>
         </form>
     </dialog>
 
-    <footer>
-        <span id="connection-status"></span>
-        · Signed in as <strong id="current-username"></strong>
-        · <button id="btn-change-password" type="button" class="btn-link">Change password</button>
-        · <button id="btn-logout" type="button" class="btn-link">Log out</button>
-    </footer>
+    <!-- Topic -->
+    <dialog class="sheet" id="sheet-topic" aria-labelledby="sheet-topic-title">
+        <form id="form-topic" novalidate>
+            <header class="sheet-bar">
+                <button type="button" class="text-btn" data-close>Cancel</button>
+                <h2 id="sheet-topic-title">New topic</h2>
+                <button type="submit" class="text-btn text-btn-strong">Save</button>
+            </header>
+            <div class="sheet-body">
+                <p class="form-error" id="topic-form-error" role="alert" hidden></p>
+                <section class="group">
+                    <div class="list form-list">
+                        <label class="form-row">
+                            <span class="form-label">Name</span>
+                            <input type="text" name="name" required placeholder="Required">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">Code</span>
+                            <input type="text" name="code" required placeholder="Required, e.g. INFRA" autocapitalize="characters" spellcheck="false">
+                        </label>
+                        <label class="form-row form-row-switch">
+                            <span class="form-label">Active</span>
+                            <input type="checkbox" class="switch" name="active" checked>
+                        </label>
+                    </div>
+                    <p class="group-footer" id="topic-code-footer">Systems use the code when starting a conversation. It can't be changed later.</p>
+                </section>
+                <section class="group">
+                    <h3 class="group-title">Description</h3>
+                    <div class="list form-list">
+                        <label class="form-row form-row-stacked">
+                            <span class="visually-hidden">Description</span>
+                            <textarea name="description" rows="4" placeholder="What this topic is for, and which metadata keys its messages carry, e.g. note, insurance_number"></textarea>
+                        </label>
+                    </div>
+                    <p class="group-footer">Integrating teams read this to know what to send. The bridge doesn't check it.</p>
+                </section>
+                <section class="group" id="topic-subscribers-section" hidden>
+                    <h3 class="group-title">Subscribed systems</h3>
+                    <div class="list" id="list-topic-subscribers"></div>
+                    <p class="group-footer">Change subscriptions from each system's settings.</p>
+                </section>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Delivery detail -->
+    <dialog class="sheet sheet-wide" id="sheet-delivery" aria-labelledby="sheet-delivery-title">
+        <div class="sheet-frame">
+            <header class="sheet-bar">
+                <span></span>
+                <h2 id="sheet-delivery-title">Delivery</h2>
+                <button type="button" class="text-btn text-btn-strong" data-close>Done</button>
+            </header>
+            <div class="sheet-body" id="delivery-detail"></div>
+        </div>
+    </dialog>
+
+    <!-- One-time API key reveal: the plaintext exists only in this response -->
+    <dialog class="sheet" id="sheet-api-key-reveal" aria-labelledby="sheet-api-key-title">
+        <div class="sheet-frame">
+            <header class="sheet-bar">
+                <span></span>
+                <h2 id="sheet-api-key-title">New key</h2>
+                <button type="button" class="text-btn text-btn-strong" id="btn-close-api-key-reveal">Done</button>
+            </header>
+            <div class="sheet-body">
+                <div class="reveal-hero">
+                    <span class="hero-icon hero-icon-blue"><svg class="icon"><use href="#i-key"/></svg></span>
+                    <p class="reveal-title">Copy this key now</p>
+                    <p class="reveal-text">It won't be shown again. Send it to the system's team. If it's lost, generate a new one and revoke this one.</p>
+                </div>
+                <div class="list form-list">
+                    <label class="form-row form-row-stacked">
+                        <span class="visually-hidden">API key</span>
+                        <input type="text" id="api-key-reveal-value" readonly class="mono">
+                    </label>
+                    <button type="button" class="list-button" id="btn-copy-api-key">
+                        <svg class="icon"><use href="#i-copy"/></svg>Copy key
+                    </button>
+                </div>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Account -->
+    <dialog class="sheet" id="sheet-account" aria-labelledby="sheet-account-title">
+        <div class="sheet-frame">
+            <header class="sheet-bar">
+                <span></span>
+                <h2 id="sheet-account-title">Account</h2>
+                <button type="button" class="text-btn text-btn-strong" data-close>Done</button>
+            </header>
+            <div class="sheet-body">
+                <div class="reveal-hero">
+                    <span class="avatar avatar-large" aria-hidden="true"><svg class="icon"><use href="#i-person"/></svg></span>
+                    <p class="reveal-title" id="account-username"></p>
+                    <p class="reveal-text">Administrator</p>
+                </div>
+                <div class="list">
+                    <button type="button" class="list-button" id="btn-change-password">
+                        <svg class="icon"><use href="#i-lock"/></svg>Change password
+                    </button>
+                </div>
+                <div class="list">
+                    <button type="button" class="list-button list-button-destructive" id="btn-logout">Log out</button>
+                </div>
+            </div>
+        </div>
+    </dialog>
+
+    <!-- Change password -->
+    <dialog class="sheet" id="sheet-change-password" aria-labelledby="sheet-password-title">
+        <form id="form-change-password" novalidate>
+            <header class="sheet-bar">
+                <button type="button" class="text-btn" data-close>Cancel</button>
+                <h2 id="sheet-password-title">Change password</h2>
+                <button type="submit" class="text-btn text-btn-strong">Change</button>
+            </header>
+            <div class="sheet-body">
+                <p class="form-error" id="change-password-error" role="alert" hidden></p>
+                <section class="group">
+                    <div class="list form-list">
+                        <label class="form-row">
+                            <span class="form-label">Current</span>
+                            <input type="password" name="current_password" required autocomplete="current-password">
+                        </label>
+                    </div>
+                </section>
+                <section class="group">
+                    <div class="list form-list">
+                        <label class="form-row">
+                            <span class="form-label">New</span>
+                            <input type="password" name="new_password" required minlength="8" autocomplete="new-password">
+                        </label>
+                        <label class="form-row">
+                            <span class="form-label">Confirm</span>
+                            <input type="password" name="new_password_confirm" required minlength="8" autocomplete="new-password">
+                        </label>
+                    </div>
+                    <p class="group-footer">At least 8 characters. Your other sessions are signed out.</p>
+                </section>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- iOS-style alert, used instead of window.confirm() -->
+    <dialog class="alert" id="alert-confirm" aria-labelledby="alert-confirm-title">
+        <div class="alert-body">
+            <h2 id="alert-confirm-title"></h2>
+            <p id="alert-confirm-message"></p>
+        </div>
+        <div class="alert-actions">
+            <button type="button" id="alert-confirm-cancel">Cancel</button>
+            <button type="button" id="alert-confirm-ok"></button>
+        </div>
+    </dialog>
 
     <script src="app.js"></script>
 </body>

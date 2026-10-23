@@ -17,6 +17,8 @@ as it was queued (outbox_service.requeue_failed).
 Security note: every route here requires an authenticated admin session
 (see require_login in app/security.py).
 """
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query
 
 from app.database import get_connection
@@ -34,10 +36,12 @@ async def list_deliveries(
     offset: int = Query(default=0, ge=0),
     status: OutboxStatus | None = None,
     system_code: str | None = Query(default=None, description="Destination system."),
+    conversation_id: UUID | None = None,
 ) -> OutboxPage:
     async with get_connection() as conn:
         rows, has_more = await outbox_service.list_entries(
-            conn, status=status, destination=system_code, limit=limit, offset=offset
+            conn, status=status, destination=system_code, conversation_id=conversation_id,
+            limit=limit, offset=offset,
         )
     return OutboxPage(
         items=[OutboxEntryOut(**row) for row in rows],
