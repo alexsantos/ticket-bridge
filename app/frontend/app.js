@@ -2,8 +2,8 @@
  * app.js
  * ------
  * Vanilla JavaScript (no framework/build step) that consumes the Ticket
- * Bridge REST API and populates the four tabs: Systems, Topics,
- * Conversations, Audit.
+ * Bridge REST API and populates the five tabs: Systems, Topics,
+ * Conversations, Deliveries, Audit.
  *
  * Note: these endpoints (/api/v1/systems, /api/v1/topics,
  * /api/v1/conversations, /api/v1/audit) require an authenticated admin
@@ -158,6 +158,7 @@ async function loadSystems() {
     const selects = [
         document.getElementById("filter-conversations-system"),
         document.getElementById("filter-audit-system"),
+        document.getElementById("filter-deliveries-system"),
     ];
     // Keep each filter's active selection across a refresh.
     const selected = selects.map((sel) => sel.value);
@@ -494,6 +495,116 @@ document.getElementById("btn-audit-next").addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Deliveries (outbox entries). Only 'failed' entries can be retried - the
+// API skips any other status - so only their rows get a checkbox.
+// ---------------------------------------------------------------------------
+const DELIVERIES_PAGE_SIZE = 50;
+let deliveriesOffset = 0;
+const retryDeliveriesBtn = document.getElementById("btn-retry-deliveries");
+const deliveriesSelectAll = document.getElementById("deliveries-select-all");
+const DELIVERY_STATUS_BADGE = { sent: "active", failed: "inactive", pending: "pending" };
+
+function selectedDeliveryCheckboxes() {
+    return Array.from(document.querySelectorAll("#table-deliveries tbody input[type=checkbox]:checked"));
+}
+
+function updateRetrySelection() {
+    const all = document.querySelectorAll("#table-deliveries tbody input[type=checkbox]");
+    const count = selectedDeliveryCheckboxes().length;
+    retryDeliveriesBtn.disabled = count === 0;
+    retryDeliveriesBtn.textContent = count ? `Retry selected (${count})` : "Retry selected";
+    deliveriesSelectAll.disabled = all.length === 0;
+    deliveriesSelectAll.checked = all.length > 0 && count === all.length;
+    deliveriesSelectAll.indeterminate = count > 0 && count < all.length;
+}
+
+async function loadDeliveries() {
+    const status = document.getElementById("filter-deliveries-status").value;
+    const systemCode = document.getElementById("filter-deliveries-system").value;
+    const params = new URLSearchParams({ limit: DELIVERIES_PAGE_SIZE, offset: deliveriesOffset });
+    if (status) params.set("status", status);
+    if (systemCode) params.set("system_code", systemCode);
+    const resp = await fetch(`${API_BASE}/deliveries?${params.toString()}`);
+    const page = await resp.json();
+
+    const tbody = document.querySelector("#table-deliveries tbody");
+    tbody.innerHTML = "";
+    for (const d of page.items) {
+        const conversation = d.conversation_subject
+            ? `${escapeHtml(d.conversation_subject)}<br><code>${escapeHtml(d.conversation_id.slice(0, 8))}…</code>`
+            : `<code>${escapeHtml(d.conversation_id.slice(0, 8))}…</code>`;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${d.status === "failed" ? `<input type="checkbox" value="${d.id}" aria-label="Select delivery ${d.id}">` : ""}</td>
+            <td>${d.id}</td>
+            <td>${formatDate(d.created_at)}</td>
+            <td><code>${escapeHtml(d.destination)}</code></td>
+            <td><code>${escapeHtml(d.source)}</code></td>
+            <td>${conversation}</td>
+            <td>${escapeHtml(d.event ?? "—")}</td>
+            <td><span class="badge ${DELIVERY_STATUS_BADGE[d.status]}">${escapeHtml(d.status)}</span></td>
+            <td>${d.attempts}/${d.max_attempts}</td>
+            <td class="delivery-error"><code></code></td>
+        `;
+        // textContent: the error can quote the destination's response body.
+        tr.querySelector(".delivery-error code").textContent = d.last_error ?? "—";
+        tr.querySelector("input[type=checkbox]")?.addEventListener("change", updateRetrySelection);
+        tbody.appendChild(tr);
+    }
+    updateRetrySelection();
+
+    const pageNumber = Math.floor(deliveriesOffset / DELIVERIES_PAGE_SIZE) + 1;
+    document.getElementById("deliveries-page-label").textContent =
+        page.items.length ? `Page ${pageNumber}` : "No deliveries";
+    document.getElementById("btn-deliveries-prev").disabled = deliveriesOffset === 0;
+    document.getElementById("btn-deliveries-next").disabled = !page.has_more;
+}
+
+["filter-deliveries-status", "filter-deliveries-system"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => {
+        deliveriesOffset = 0;
+        loadDeliveries();
+    });
+});
+document.getElementById("btn-deliveries-prev").addEventListener("click", () => {
+    deliveriesOffset = Math.max(0, deliveriesOffset - DELIVERIES_PAGE_SIZE);
+    loadDeliveries();
+});
+document.getElementById("btn-deliveries-next").addEventListener("click", () => {
+    deliveriesOffset += DELIVERIES_PAGE_SIZE;
+    loadDeliveries();
+});
+deliveriesSelectAll.addEventListener("change", () => {
+    document.querySelectorAll("#table-deliveries tbody input[type=checkbox]").forEach((cb) => {
+        cb.checked = deliveriesSelectAll.checked;
+    });
+    updateRetrySelection();
+});
+
+retryDeliveriesBtn.addEventListener("click", async () => {
+    const ids = selectedDeliveryCheckboxes().map((cb) => Number(cb.value));
+    if (ids.length === 0) return;
+    const out = document.getElementById("deliveries-sync-result");
+    retryDeliveriesBtn.disabled = true;
+    const resp = await fetch(`${API_BASE}/deliveries/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outbox_ids: ids }),
+    });
+    const result = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+        out.textContent = `${result.retried.length} queued for retry - delivered on the next sync, or use Sync now.`
+            + (result.skipped.length ? ` ${result.skipped.length} skipped (no longer failed).` : "");
+        out.className = result.skipped.length ? "hint warning sync-result" : "hint sync-result";
+    } else {
+        out.textContent = `Retry failed: ${typeof result.detail === "string" ? result.detail : `HTTP ${resp.status}`}`;
+        out.className = "hint warning sync-result";
+    }
+    out.hidden = false;
+    await loadDeliveries();
+});
+
+// ---------------------------------------------------------------------------
 // Refresh buttons (one per section) - reload that section's data in place,
 // keeping its filters and, for Audit, the current page.
 // ---------------------------------------------------------------------------
@@ -503,6 +614,7 @@ const refreshers = {
     systems: async () => { await loadTopics(); await loadSystems(); },
     topics: loadTopics,
     conversations: loadConversations,
+    deliveries: loadDeliveries,
     audit: loadAudit,
 };
 
@@ -517,24 +629,28 @@ document.querySelectorAll(".btn-refresh[data-refresh]").forEach((btn) => {
     });
 });
 
-// Sync now: delivers pending outbox entries immediately (POST /api/v1/sync
-// accepts the admin session), then reloads the audit log to show results.
-document.getElementById("btn-sync-now").addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
-    const out = document.getElementById("sync-result");
-    btn.disabled = true;
-    try {
-        const resp = await fetch(`${API_BASE}/sync`, { method: "POST" });
-        const result = await resp.json();
-        out.textContent = resp.ok
-            ? `Sync: ${result.processed} processed - ${result.success} delivered, ${result.failures} failed.`
-            : `Sync failed: ${result.detail ?? `HTTP ${resp.status}`}`;
-        out.className = resp.ok && result.failures === 0 ? "hint" : "hint warning";
-        out.hidden = false;
-        await loadAudit();
-    } finally {
-        btn.disabled = false;
-    }
+// Sync now (Audit and Deliveries tabs): delivers pending outbox entries
+// immediately (POST /api/v1/sync accepts the admin session), then reloads
+// both tabs to show the results. Each button reports into its own tab's
+// data-result element.
+document.querySelectorAll(".btn-sync-now").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+        const out = document.getElementById(btn.dataset.result);
+        btn.disabled = true;
+        try {
+            const resp = await fetch(`${API_BASE}/sync`, { method: "POST" });
+            const result = await resp.json();
+            out.textContent = resp.ok
+                ? `Sync: ${result.processed} processed - ${result.success} delivered, ${result.failures} failed.`
+                : `Sync failed: ${result.detail ?? `HTTP ${resp.status}`}`;
+            out.className = resp.ok && result.failures === 0 ? "hint sync-result" : "hint warning sync-result";
+            out.hidden = false;
+            await loadDeliveries();
+            await loadAudit();
+        } finally {
+            btn.disabled = false;
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -620,6 +736,7 @@ changePasswordForm.addEventListener("submit", async (e) => {
         await loadTopics();
         await loadSystems();
         await loadConversations();
+        await loadDeliveries();
         await loadAudit();
     } catch (e) {
         statusEl.textContent = "Could not reach the service.";

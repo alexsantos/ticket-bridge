@@ -588,6 +588,36 @@ have it off.
   bundle / pinned certificate (`verify=` also accepts an `ssl.SSLContext`
   or a CA file path) - not done until there's a concrete need.
 
+## Decision 16 — Retrying failed deliveries: chosen entries only, payload unchanged
+
+**Problem closed**: an outbox entry that reaches `max_attempts` stays
+`failed` for good (Decision 2's "manual intervention"), and the only
+intervention was an `UPDATE outbox` by hand - e.g. after fixing a
+system's TLS setting (Decision 15), every delivery that failed meanwhile
+needed SQL to go out again.
+
+**Decision made**: a "Deliveries" tab (`GET /api/v1/deliveries`, paged
+and filtered like the audit log) and `POST /api/v1/deliveries/retry`
+with explicit `outbox_ids` - `outbox_service.requeue_failed` sets them
+back to `pending` with `attempts = 0`, and the normal sync delivers them.
+
+- **The admin picks the entries; there is no "retry all"** (also not per
+  system). A backlog of failures can include entries that are stale or
+  no longer wanted, and once retried they can't be taken back.
+- **Only `failed` entries**: `pending` ones are already being retried,
+  and `sent` ones were delivered - resending those would be a replay,
+  which is a different operation (duplicates at the destination) and not
+  what this is for. Anything else in the request is reported as
+  `skipped`, not an error.
+- **Same row, same payload** - not a new outbox row with a rebuilt
+  payload. The audit trail keeps one entry per delivery, and what's sent
+  is exactly what was queued. Accepted consequence: `event`
+  (`ticket.created`/`ticket.updated`, Decision 8) reflects the moment it
+  was queued, so an adapter that never got a conversation's first message
+  sees each follow-up as `ticket.created` too.
+- **The reset clears `last_error`**, so the previous attempts and error
+  are recorded in the audit log (`delivery_retry_requested`) first.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the

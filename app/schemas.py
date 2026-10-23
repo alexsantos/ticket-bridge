@@ -312,3 +312,43 @@ class AuditLogPage(BaseModel):
     limit: int
     offset: int
     has_more: bool
+
+
+# ---------------------------------------------------------------------------
+# Deliveries (outbox entries - GET /api/v1/deliveries, POST .../retry)
+# ---------------------------------------------------------------------------
+OutboxStatus = Literal["pending", "sent", "failed"]
+
+
+class OutboxEntryOut(BaseModel):
+    id: int
+    conversation_id: UUID
+    conversation_subject: str | None
+    destination: str
+    source: str
+    event: str | None
+    status: OutboxStatus
+    attempts: int
+    max_attempts: int
+    last_error: str | None
+    created_at: datetime
+    processed_at: datetime | None
+
+
+class OutboxPage(BaseModel):
+    items: list[OutboxEntryOut]
+    limit: int
+    offset: int
+    has_more: bool
+
+
+class RetryDeliveriesRequest(BaseModel):
+    outbox_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class RetryDeliveriesResult(BaseModel):
+    retried: list[int] = Field(description="Entries put back in the queue - delivered on the next sync.")
+    skipped: list[int] = Field(
+        description="Requested entries that weren't retried: not found, or not 'failed' "
+                    "(pending ones are still being retried; sent ones were delivered)."
+    )

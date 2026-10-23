@@ -7,7 +7,7 @@
     internal integration service, not an end-user application, so a
     framework/bundler isn't warranted.
 
-    Four tabs:
+    Five tabs:
       - Systems: list/create/edit federated systems and their topic subscriptions.
         Editing an existing system also exposes its inbound API keys (the
         credential it sends back as X-API-Key on POST /api/v1/events):
@@ -16,6 +16,7 @@
         in app.js) - it is never shown or retrievable again afterward.
       - Topics: list/create/edit ticket categories/queues (e.g. INFRA, SPM, SALES).
       - Conversations: browse conversations and each participant's status.
+      - Deliveries: browse outbox entries, and pick failed ones to retry.
       - Audit: browse the event log (audit_log).
 
     Requires an authenticated admin session - app.js's start() redirects
@@ -41,6 +42,7 @@
         <button class="tab-btn active" data-tab="systems">Systems</button>
         <button class="tab-btn" data-tab="topics">Topics</button>
         <button class="tab-btn" data-tab="conversations">Conversations</button>
+        <button class="tab-btn" data-tab="deliveries">Deliveries</button>
         <button class="tab-btn" data-tab="audit">Audit</button>
     </nav>
 
@@ -242,6 +244,54 @@
             </table>
         </section>
 
+        <!-- ================= DELIVERIES ================= -->
+        <section id="tab-deliveries" class="tab-panel">
+            <div class="panel-header">
+                <h2>Deliveries</h2>
+                <div class="panel-actions">
+                    <label>Status:
+                        <select id="filter-deliveries-status">
+                            <option value="failed" selected>Failed</option>
+                            <option value="pending">Pending</option>
+                            <option value="sent">Sent</option>
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <label>Destination:
+                        <select id="filter-deliveries-system">
+                            <option value="">All</option>
+                        </select>
+                    </label>
+                    <button type="button" class="btn-refresh" data-refresh="deliveries" title="Reload this section's data">↻ Refresh</button>
+                    <button type="button" class="btn-refresh btn-sync-now" data-result="deliveries-sync-result" title="Deliver pending outbox entries now instead of waiting for the scheduler">⇪ Sync now</button>
+                    <button type="button" id="btn-retry-deliveries" class="btn-primary" disabled>Retry selected</button>
+                </div>
+            </div>
+            <p class="hint">
+                A delivery that fails is retried on each sync until it reaches its maximum attempts,
+                then stays <strong>failed</strong>. Once the cause is fixed (e.g. the system's URL,
+                secret or certificate setting), tick the ones to send again and click
+                <em>Retry selected</em>: they go back in the queue, unchanged, and are delivered on
+                the next sync (or <em>Sync now</em>).
+            </p>
+            <p id="deliveries-sync-result" class="hint sync-result" aria-live="polite" hidden></p>
+            <table id="table-deliveries">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="deliveries-select-all" title="Select all failed deliveries on this page"></th>
+                        <th>ID</th><th>Created</th><th>Destination</th><th>Source</th>
+                        <th>Conversation</th><th>Event</th><th>Status</th><th>Attempts</th><th>Last error</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination">
+                <button id="btn-deliveries-prev" type="button">← Previous</button>
+                <span id="deliveries-page-label"></span>
+                <button id="btn-deliveries-next" type="button">Next →</button>
+            </div>
+        </section>
+
         <!-- ================= AUDIT ================= -->
         <section id="tab-audit" class="tab-panel">
             <div class="panel-header">
@@ -253,10 +303,10 @@
                         </select>
                     </label>
                     <button type="button" class="btn-refresh" data-refresh="audit" title="Reload this section's data">↻ Refresh</button>
-                    <button type="button" id="btn-sync-now" class="btn-refresh" title="Deliver pending outbox entries now instead of waiting for the scheduler">⇪ Sync now</button>
+                    <button type="button" class="btn-refresh btn-sync-now" data-result="sync-result" title="Deliver pending outbox entries now instead of waiting for the scheduler">⇪ Sync now</button>
                 </div>
             </div>
-            <p id="sync-result" class="hint" aria-live="polite" hidden></p>
+            <p id="sync-result" class="hint sync-result" aria-live="polite" hidden></p>
             <table id="table-audit">
                 <thead>
                     <tr>

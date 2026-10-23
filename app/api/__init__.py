@@ -7,4 +7,5 @@ REST API routers, one file per functional area:
   - topics.py: CRUD for ticket topics/categories (e.g. INFRA, SPM, SALES).
   - conversations.py: querying conversations and their participants.
   - audit.py: querying the audit trail.
+  - deliveries.py: browsing outbox entries and retrying chosen failed ones.
 """

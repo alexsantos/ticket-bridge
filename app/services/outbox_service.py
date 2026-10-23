@@ -107,3 +107,86 @@ async def mark_failed(conn: AsyncConnection, *, outbox_id: int, error: str) -> N
             """,
             {"id": outbox_id, "error": error[:2000]},
         )
+
+
+async def list_entries(
+    conn: AsyncConnection,
+    *,
+    status: str | None = None,
+    destination: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Lists outbox entries page by page (most recent first), with optional
+    filters - feeds the frontend's "Deliveries" tab. Returns (rows,
+    has_more), computed the same way as audit_service.list_recent (one
+    extra row past `limit`, no COUNT(*)).
+
+    Each row carries the conversation's subject and the payload's `event`
+    (ticket.created / ticket.updated), not the full payload.
+    """
+    filters = []
+    params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
+
+    if status is not None:
+        filters.append("o.status = %(status)s")
+        params["status"] = status
+    if destination is not None:
+        filters.append("o.destination = %(destination)s")
+        params["destination"] = destination
+
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"""
+            SELECT o.id, o.conversation_id, c.subject AS conversation_subject,
+                   o.destination, o.source, o.payload->>'event' AS event,
+                   o.status, o.attempts, o.max_attempts, o.last_error,
+                   o.created_at, o.processed_at
+            FROM outbox o
+            JOIN conversations c ON c.conversation_id = o.conversation_id
+            {where_clause}
+            ORDER BY o.id DESC
+            LIMIT %(limit)s
+            OFFSET %(offset)s
+            """,
+            params,
+        )
+        rows = await cur.fetchall()
+
+    has_more = len(rows) > limit
+    return rows[:limit], has_more
+
+
+async def requeue_failed(conn: AsyncConnection, *, outbox_ids: list[int]) -> list[dict[str, Any]]:
+    """
+    Puts the given 'failed' entries back in the queue ('pending', attempts
+    reset to 0), so the next /sync delivers them again with the same
+    payload. Entries that aren't 'failed' (pending ones are still being
+    retried, sent ones were delivered) are left untouched and not returned.
+
+    Returns one row per requeued entry, with its attempts and last_error
+    from *before* the reset - the caller records them in the audit log,
+    since the reset clears them from the outbox row itself.
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            WITH previous AS (
+                SELECT id, attempts, last_error
+                FROM outbox
+                WHERE id = ANY(%(ids)s) AND status = 'failed'
+                FOR UPDATE
+            )
+            UPDATE outbox o
+            SET status = 'pending', attempts = 0, last_error = NULL, processed_at = NULL
+            FROM previous
+            WHERE o.id = previous.id
+            RETURNING o.id, o.conversation_id, o.destination,
+                      previous.attempts AS previous_attempts, previous.last_error AS previous_error
+            """,
+            {"ids": outbox_ids},
+        )
+        return await cur.fetchall()

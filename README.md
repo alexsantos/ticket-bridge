@@ -254,7 +254,8 @@ ticket-bridge/
 │   │   │                        #   inbound API key lifecycle: .../api-keys)
 │   │   ├── topics.py            # CRUD /api/v1/topics   (ticket categories, e.g. INFRA/SPM/SALES)
 │   │   ├── conversations.py     # GET  /api/v1/conversations
-│   │   └── audit.py             # GET  /api/v1/audit
+│   │   ├── audit.py             # GET  /api/v1/audit
+│   │   └── deliveries.py        # GET  /api/v1/deliveries, POST .../retry (outbox entries)
 │   ├── services/
 │   │   ├── correlation_service.py  # conversation/participant management + fan-out resolution
 │   │   ├── payload_builder.py      # builds the one fixed outbound payload shape
@@ -876,7 +877,7 @@ option, would need new code in `dispatcher.py`).
 ## 5. Configuration frontend security
 
 The configuration (`/api/v1/systems`, `/api/v1/topics`) and audit
-(`/api/v1/conversations`, `/api/v1/audit`) endpoints, and the static
+(`/api/v1/conversations`, `/api/v1/deliveries`, `/api/v1/audit`) endpoints, and the static
 frontend's own data, require an **authenticated admin session** —
 implemented in-app (`app/api/auth.py`, `require_login` in
 `app/security.py`), not delegated to an external proxy. See CLAUDE.md
@@ -937,16 +938,27 @@ defense-in-depth on top of the above, rather than the only mechanism.
   change what that system receives. Both are no-deploy configuration
   changes - unsubscribing takes effect immediately (see CLAUDE.md
   Decision 8).
-- **Diagnosing a failed delivery**: "Audit" tab, filter by system;
-  `delivery_failure` entries show the HTTP/network error. The corresponding
-  row in the `outbox` table stays `pending` until `max_attempts`, at which
-  point it becomes `failed` for manual intervention.
-- **Manually retrying a failed delivery**:
+- **Diagnosing a failed delivery**: "Deliveries" tab (status *Failed*,
+  filter by destination) shows each undelivered entry with its last
+  error; the "Audit" tab's `delivery_failure` entries show every attempt.
+  An entry stays `pending` (retried on each sync) until `max_attempts`, at
+  which point it becomes `failed` for manual intervention.
+- **Retrying failed deliveries**, once the cause is fixed (URL, secret,
+  certificate setting): in the "Deliveries" tab, tick the entries to send
+  again and click *Retry selected* (API: `POST /api/v1/deliveries/retry`
+  with `{"outbox_ids": [...]}`). They go back in the queue with their
+  original payload and attempts reset, and are delivered on the next sync
+  - or click *Sync now*. Only `failed` entries can be retried; the audit
+  log records each retry (`delivery_retry_requested`, with the previous
+  error). Each payload's `event` was decided when it was queued, so if a
+  system never received a conversation's first message, its follow-ups
+  are `ticket.created` too - its adapter should key on `conversation_id`
+  rather than open a ticket per message. Without the frontend, the SQL
+  equivalent is:
   ```sql
   UPDATE outbox SET status = 'pending', attempts = 0
-  WHERE id = <row_id>;
+  WHERE id = <row_id> AND status = 'failed';
   ```
-  The next `/sync` run will retry it.
 
 ---
 
