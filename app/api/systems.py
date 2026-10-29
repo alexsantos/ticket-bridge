@@ -15,6 +15,7 @@ Security note: every route here requires an authenticated admin session
 (see require_login in app/security.py, app/api/auth.py, CLAUDE.md
 Decision 11) - no longer assumed to sit behind an external proxy.
 """
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Dep
 # so _row_to_system_out can split it into its non-secret parts - it is never
 # returned as-is (see SystemOut).
 _SELECT_SYSTEM_COLUMNS = """
-    s.code, s.name, s.base_url, s.verify_tls, s.active, s.auth_config,
+    s.code, s.name, s.delivery_mode, s.base_url, s.last_polled_at, s.verify_tls, s.active, s.auth_config,
     s.outbound_secret_encrypted IS NOT NULL AS has_secret,
     s.created_at, s.updated_at,
     COALESCE(
@@ -91,10 +92,11 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                     await cur.execute(
                         """
                         INSERT INTO systems
-                            (code, name, base_url, auth_config, verify_tls, active, outbound_secret_encrypted)
+                            (code, name, delivery_mode, base_url, auth_config, verify_tls, active,
+                             outbound_secret_encrypted)
                         VALUES
-                            (%(code)s, %(name)s, %(base_url)s, %(auth_config)s, %(verify_tls)s, %(active)s,
-                             %(outbound_secret_encrypted)s)
+                            (%(code)s, %(name)s, %(delivery_mode)s, %(base_url)s, %(auth_config)s, %(verify_tls)s,
+                             %(active)s, %(outbound_secret_encrypted)s)
                         """,
                         values,
                     )
@@ -120,8 +122,8 @@ async def create_system(payload: SystemCreate) -> SystemOut:
                 system_code=payload.code,
                 event_type="system_config_created",
                 detail={
-                    "name": payload.name, "base_url": payload.base_url, "topics": payload.topics,
-                    "verify_tls": payload.verify_tls,
+                    "name": payload.name, "delivery_mode": payload.delivery_mode, "base_url": payload.base_url,
+                    "topics": payload.topics, "verify_tls": payload.verify_tls,
                     "outbound_secret_set": payload.outbound_secret is not None,
                 },
             )
@@ -174,10 +176,16 @@ async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
                     if drop_legacy_secret_ref and "auth_config" not in column_updates:
                         set_parts.append(f"auth_config = {base_auth}")
                     set_clause = ", ".join(set_parts)
-                    await cur.execute(
-                        f"UPDATE systems SET {set_clause} WHERE code = %(code)s RETURNING code",
-                        {**column_updates, "code": code},
-                    )
+                    try:
+                        await cur.execute(
+                            f"UPDATE systems SET {set_clause} WHERE code = %(code)s RETURNING code",
+                            {**column_updates, "code": code},
+                        )
+                    except psycopg.errors.CheckViolation as exc:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="A system that receives messages by webhook needs a base_url.",
+                        ) from exc
                 else:
                     await cur.execute("SELECT code FROM systems WHERE code = %(code)s", {"code": code})
 

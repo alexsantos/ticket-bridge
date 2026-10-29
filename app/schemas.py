@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CanonicalStatus(StrEnum):
@@ -153,10 +153,19 @@ def _check_auth_config(value: dict[str, Any] | None) -> dict[str, Any] | None:
     return value
 
 
+DeliveryMode = Literal["push", "pull"]
+_DELIVERY_MODE_DOC = (
+    "'push' (default): the bridge POSTs each message to base_url. 'pull': the system "
+    "collects its messages from GET /api/v1/inbox with its API key, and needs no "
+    "base_url. See CLAUDE.md Decision 18."
+)
+
+
 class SystemCreate(BaseModel):
     code: str
     name: str
-    base_url: str
+    delivery_mode: DeliveryMode = Field(default="push", description=_DELIVERY_MODE_DOC)
+    base_url: str | None = Field(default=None, description="Webhook URL. Required for a push system.")
     auth_config: dict[str, Any] = Field(
         default_factory=dict,
         description="How the outbound secret is sent: optional 'header' (default "
@@ -180,9 +189,16 @@ class SystemCreate(BaseModel):
 
     _auth_config_keys = field_validator("auth_config")(_check_auth_config)
 
+    @model_validator(mode="after")
+    def _push_needs_a_url(self):
+        if self.delivery_mode == "push" and not self.base_url:
+            raise ValueError("base_url is required for a push system (or set delivery_mode to 'pull').")
+        return self
+
 
 class SystemUpdate(BaseModel):
     name: str | None = None
+    delivery_mode: DeliveryMode | None = Field(default=None, description=_DELIVERY_MODE_DOC)
     base_url: str | None = None
     auth_config: dict[str, Any] | None = None
     verify_tls: bool | None = None
@@ -201,7 +217,11 @@ class SystemUpdate(BaseModel):
 class SystemOut(BaseModel):
     code: str
     name: str
-    base_url: str
+    delivery_mode: DeliveryMode
+    base_url: str | None
+    last_polled_at: datetime | None = Field(
+        default=None, description="Pull systems only: when it last called GET /api/v1/inbox."
+    )
     verify_tls: bool
     active: bool
     topics: list[str]
@@ -352,4 +372,31 @@ class RetryDeliveriesResult(BaseModel):
     skipped: list[int] = Field(
         description="Requested entries that weren't retried: not found, or not 'failed' "
                     "(pending ones are still being retried; sent ones were delivered)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Inbox (GET /api/v1/inbox, POST /api/v1/inbox/ack) - how a pull system
+# collects its messages. Authenticated with the system's own API key, like
+# POST /api/v1/events. See CLAUDE.md Decision 18.
+# ---------------------------------------------------------------------------
+class InboxMessage(BaseModel):
+    delivery_id: int = Field(description="Acknowledge with this id once processed; ignore an id already handled.")
+    queued_at: datetime
+    message: OutboundTicketEvent = Field(description="Exactly what a push system receives on its webhook.")
+
+
+class InboxPage(BaseModel):
+    items: list[InboxMessage] = Field(description="Oldest first.")
+    has_more: bool = Field(description="More messages are waiting - acknowledge these, then call again.")
+
+
+class InboxAck(BaseModel):
+    delivery_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class InboxAckResult(BaseModel):
+    acknowledged: list[int]
+    skipped: list[int] = Field(
+        description="Not found, not this system's, or already acknowledged - safe to ignore."
     )

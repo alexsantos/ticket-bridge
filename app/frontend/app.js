@@ -142,6 +142,26 @@ function eventLabel(event) {
     return event === "ticket.created" ? "New ticket" : event === "ticket.updated" ? "Update" : (event ?? "Message");
 }
 
+// Pull systems collect their messages from the bridge's inbox instead of a
+// webhook (Decision 18); until they do, their messages wait - not "to
+// send" but "to be collected".
+const STALE_POLL_MINUTES = 15;
+
+function isPull(code) {
+    return state.systemsByCode.get(code)?.delivery_mode === "pull";
+}
+
+function waitingLabel(d) {
+    return isPull(d.destination) ? `Waiting for ${systemName(d.destination)} to collect it` : "Waiting to send";
+}
+
+// An active pull system that hasn't called its inbox recently (or ever).
+function isStalePuller(s) {
+    if (s.delivery_mode !== "pull" || !s.active) return false;
+    if (!s.last_polled_at) return true;
+    return Date.now() - new Date(s.last_polled_at).getTime() > STALE_POLL_MINUTES * 60000;
+}
+
 function hostOf(url) {
     try { return new URL(url).host; } catch { return url; }
 }
@@ -441,6 +461,26 @@ async function renderOverview() {
                 <span class="row-trailing"><span>Review</span>${CHEVRON}</span>
             </a>`);
     }
+    for (const s of state.systems.filter(isStalePuller)) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "attention";
+        btn.innerHTML = `
+            <span class="tile tile-orange">${icon("i-clock")}</span>
+            <span class="row-main">
+                <span class="attention-title"></span>
+                <span class="row-subtitle wrap"></span>
+            </span>
+            <span class="row-trailing"><span>Open</span>${CHEVRON}</span>`;
+        btn.querySelector(".attention-title").textContent = s.last_polled_at
+            ? `${s.name} stopped collecting its messages`
+            : `${s.name} hasn't collected any messages yet`;
+        btn.querySelector(".row-subtitle").textContent = s.last_polled_at
+            ? `Last collected ${formatDateTime(s.last_polled_at)}. Its messages wait in the bridge until it does.`
+            : "It collects them from the bridge's inbox with its own key. Check that its integration is running.";
+        btn.addEventListener("click", () => openSystemSheet(s));
+        attention.appendChild(btn);
+    }
     for (const s of state.systems.filter((x) => x.has_legacy_secret_ref)) {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -470,7 +510,7 @@ async function renderOverview() {
         </a>
         <a class="row has-leading" href="#/deliveries?status=pending">
             <span class="tile tile-orange">${icon("i-clock")}</span>
-            <span class="row-main"><span class="row-title">Waiting to send</span></span>
+            <span class="row-main"><span class="row-title">Waiting</span></span>
             <span class="row-trailing"><span class="row-count">${pendingLabel}</span>${CHEVRON}</span>
         </a>
         <a class="row has-leading" href="#/deliveries?status=sent">
@@ -741,7 +781,11 @@ function messageHtml(m) {
         <dd>${escapeHtml(typeof v === "string" ? v : JSON.stringify(v))}</dd>`).join("");
     const receipts = m.deliveries.map((del) => {
         const s = DELIVERY_STATUS[del.status];
-        const verb = del.status === "sent" ? "Delivered to" : del.status === "pending" ? "Waiting to send to" : "Couldn't deliver to";
+        const verb = del.status === "sent"
+            ? (isPull(del.destination) ? "Collected by" : "Delivered to")
+            : del.status === "pending"
+                ? (isPull(del.destination) ? "Waiting to be collected by" : "Waiting to send to")
+                : "Couldn't deliver to";
         return `
             <span class="receipt-line">
                 <button type="button" class="receipt ${s.cls}" data-delivery="${del.id}">
@@ -798,7 +842,7 @@ function deliveryRow(d) {
                 <span class="row-title wrap">${escapeHtml(systemName(d.source))} to ${escapeHtml(systemName(d.destination))}</span>
                 <span class="row-subtitle">${escapeHtml(eventLabel(d.event))}: ${escapeHtml(d.conversation_subject || "Untitled conversation")}</span>
                 ${d.status === "failed" && d.last_error ? `<span class="row-error">${escapeHtml(d.last_error)}</span>` : ""}
-                ${d.status === "pending" ? `<span class="row-note">${d.attempts > 0 ? `Attempt ${d.attempts} of ${d.max_attempts} failed, trying again` : "Waiting to send"}</span>` : ""}
+                ${d.status === "pending" ? `<span class="row-note">${d.attempts > 0 ? `Attempt ${d.attempts} of ${d.max_attempts} failed, trying again` : escapeHtml(waitingLabel(d))}</span>` : ""}
             </span>
             <span class="row-trailing">
                 <span class="row-time">${escapeHtml(formatRelative(d.created_at))}</span>
@@ -935,18 +979,22 @@ function openDeliverySheet(d) {
     const s = DELIVERY_STATUS[d.status];
     const explanation = {
         sent: `Accepted by ${systemName(d.destination)} on ${formatDateTime(d.processed_at)}.`,
-        pending: d.attempts
-            ? `Attempt ${d.attempts} of ${d.max_attempts} failed. The bridge tries again on its next run.`
-            : "Queued. It goes out on the bridge's next run, or when you send pending messages now.",
+        pending: isPull(d.destination)
+            ? `${systemName(d.destination)} collects its messages from the bridge's inbox. This one waits there until it does.`
+            : d.attempts
+                ? `Attempt ${d.attempts} of ${d.max_attempts} failed. The bridge tries again on its next run.`
+                : "Queued. It goes out on the bridge's next run, or when you send pending messages now.",
         failed: `The bridge stopped after ${plural(d.attempts, "attempt")}. Fix the cause below, then retry.`,
     }[d.status];
 
+    const heroLabel = d.status === "pending" && isPull(d.destination) ? "Waiting to be collected"
+        : d.status === "sent" && isPull(d.destination) ? "Collected" : s.label;
     $("sheet-delivery-title").textContent = `Delivery ${d.id}`;
     const body = $("delivery-detail");
     body.innerHTML = `
         <div class="reveal-hero">
             <span class="hero-icon ${s.hero}">${icon(s.icon)}</span>
-            <p class="reveal-title">${escapeHtml(s.label)}</p>
+            <p class="reveal-title">${escapeHtml(heroLabel)}</p>
             <p class="reveal-text">${escapeHtml(explanation)}</p>
         </div>
         ${d.status === "failed" ? `
@@ -1033,7 +1081,10 @@ function drawSystems() {
             s.active ? "" : `<span class="pill">Inactive</span>`,
             s.has_legacy_secret_ref ? `<span class="pill pill-red">Needs its secret</span>` : "",
             s.topics.length === 0 ? `<span class="pill pill-orange">No topics</span>` : `<span class="pill">${escapeHtml(plural(s.topics.length, "topic"))}</span>`,
-            s.verify_tls === false ? `<span class="pill pill-orange">Self-signed certificate</span>` : "",
+            s.delivery_mode === "pull"
+                ? (isStalePuller(s) ? `<span class="pill pill-orange">Not collecting</span>` : `<span class="pill pill-blue">Collects its messages</span>`)
+                : "",
+            s.delivery_mode === "push" && s.verify_tls === false ? `<span class="pill pill-orange">Self-signed certificate</span>` : "",
             s.has_secret ? `<span class="pill">${icon("i-lock")}Secret set</span>` : "",
         ].join("");
         return `
@@ -1041,7 +1092,9 @@ function drawSystems() {
                 ${avatar(s.code, s.name)}
                 <span class="row-main">
                     <span class="row-title">${escapeHtml(s.name)}</span>
-                    <span class="row-subtitle">${escapeHtml(s.code)} – ${escapeHtml(hostOf(s.base_url))}</span>
+                    <span class="row-subtitle">${escapeHtml(s.code)} – ${escapeHtml(s.delivery_mode === "pull"
+                        ? (s.last_polled_at ? `last collected ${formatRelative(s.last_polled_at)}` : "never collected")
+                        : hostOf(s.base_url))}</span>
                     <span class="row-meta">${pills}</span>
                 </span>
                 <span class="row-trailing">${CHEVRON}</span>
@@ -1092,6 +1145,20 @@ function drawTopics() {
 const systemForm = $("form-system");
 const clearSecretSwitch = $("clear-outbound-secret-checkbox");
 let systemBeingEdited = null;
+let systemDeliveryMode = "push";
+
+function setDeliveryMode(mode) {
+    systemDeliveryMode = mode;
+    document.querySelectorAll("#delivery-mode > button").forEach((b) => {
+        b.setAttribute("aria-checked", String(b.dataset.value === mode));
+    });
+    $("push-settings").hidden = mode !== "push";
+    $("pull-settings").hidden = mode !== "pull";
+    $("outbound-auth-section").hidden = mode !== "push";
+}
+document.querySelectorAll("#delivery-mode > button").forEach((b) => {
+    b.addEventListener("click", () => setDeliveryMode(b.dataset.value));
+});
 
 clearSecretSwitch.addEventListener("change", () => {
     systemForm.outbound_secret.disabled = clearSecretSwitch.checked;
@@ -1111,12 +1178,14 @@ function openSystemSheet(system) {
     if (system) {
         systemForm.code.value = system.code;
         systemForm.name.value = system.name;
-        systemForm.base_url.value = system.base_url;
+        systemForm.base_url.value = system.base_url ?? "";
         systemForm.active.checked = system.active;
         systemForm.skip_tls_verify.checked = system.verify_tls === false;
         systemForm.auth_header.value = system.auth_header ?? "";
         systemForm.auth_value_prefix.value = system.auth_value_prefix ?? "";
     }
+    setDeliveryMode(system?.delivery_mode ?? "push");
+    $("system-last-polled").textContent = system?.last_polled_at ? formatDateTime(system.last_polled_at) : "Never";
 
     // The secret is never returned - only whether one is stored. Leaving
     // the field empty on Save keeps it.
@@ -1165,7 +1234,7 @@ systemForm.addEventListener("submit", async (e) => {
     const missing = [];
     if (!data.get("name")?.trim()) missing.push("a name");
     if (!systemBeingEdited && !data.get("code")?.trim()) missing.push("a code");
-    if (!data.get("base_url")?.trim()) missing.push("a webhook URL");
+    if (systemDeliveryMode === "push" && !data.get("base_url")?.trim()) missing.push("a webhook URL");
     if (missing.length) {
         errorEl.textContent = `Enter ${missing.join(", ")}.`;
         errorEl.hidden = false;
@@ -1180,11 +1249,13 @@ systemForm.addEventListener("submit", async (e) => {
 
     const body = {
         name: data.get("name").trim(),
-        base_url: data.get("base_url").trim(),
+        delivery_mode: systemDeliveryMode,
         verify_tls: !systemForm.skip_tls_verify.checked,
         active: systemForm.active.checked,
         topics: [...$("system-topics").querySelectorAll("input:checked")].map((el) => el.value),
     };
+    // A pull system keeps any URL it had (unused) - only send one that's typed.
+    if (data.get("base_url")?.trim()) body.base_url = data.get("base_url").trim();
     if (Object.keys(authConfig).length) body.auth_config = authConfig;
     const secret = data.get("outbound_secret");
     if (systemBeingEdited && clearSecretSwitch.checked) body.clear_outbound_secret = true;
@@ -1370,7 +1441,7 @@ function describeActivity(r) {
         event_received: { tile: "tile-blue", icon: "i-conversations", title: `Message from ${sys}`, sub: d.status ? `Status: ${CONVERSATION_STATUS[d.status]?.label ?? d.status}` : "" },
         conversation_created: { tile: "tile-blue", icon: "i-plus", title: `${sys} started a conversation`, sub: d.topic_code ? `Topic: ${topicName(d.topic_code)}` : "" },
         fanout_scheduled: { tile: "tile-gray", icon: "i-send", title: (d.outbox_ids ?? []).length ? `Queued for ${plural(d.outbox_ids.length, "system")}` : "Nobody else receives this topic", sub: (d.destinations ?? []).map((x) => systemName(x.destination)).join(", ") },
-        delivery_success: { tile: "tile-green", icon: "i-check", title: `Delivered to ${sys}`, sub: "" },
+        delivery_success: { tile: "tile-green", icon: "i-check", title: d.collected ? `Collected by ${sys}` : `Delivered to ${sys}`, sub: "" },
         delivery_failure: { tile: "tile-red", icon: "i-alert", title: `Couldn't deliver to ${sys}`, sub: d.error ?? "" },
         delivery_retry_requested: { tile: "tile-orange", icon: "i-retry", title: `Retry requested for ${sys}`, sub: d.previous_error ?? "" },
         system_config_created: { tile: "tile-gray", icon: "i-gear", title: `${sys} added`, sub: "" },

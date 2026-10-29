@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS tickets (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+-- Inbox deliveries already processed (pull mode): the bridge redelivers
+-- anything not acknowledged, so the same delivery_id can arrive twice.
+CREATE TABLE IF NOT EXISTS collected (
+    delivery_id  INTEGER PRIMARY KEY,
+    collected_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -60,6 +66,9 @@ SETTINGS_ENV = {
     "default_topic": ("SIM_DEFAULT_TOPIC", ""),
     "inbound_header": ("SIM_INBOUND_HEADER", "X-API-Key"),
     "inbound_secret": ("SIM_INBOUND_SECRET", ""),
+    # 'push': the bridge POSTs to /webhook. 'pull': the simulator collects
+    # from the bridge's inbox (GET /api/v1/inbox) - see main.collect_inbox.
+    "delivery_mode": ("SIM_DELIVERY_MODE", "push"),
 }
 SECRET_SETTINGS = {"api_key", "inbound_secret"}
 
@@ -199,3 +208,14 @@ def list_messages(ticket_id: int) -> list[dict[str, Any]]:
             "SELECT * FROM messages WHERE ticket_id = ? ORDER BY id", (ticket_id,)
         ).fetchall()
     return [{**dict(r), "metadata": json.loads(r["metadata"])} for r in rows]
+
+
+# --- inbox (pull mode) -------------------------------------------------------
+
+def mark_collected(delivery_id: int) -> bool:
+    """Records an inbox delivery as processed. False if it already was (a redelivery)."""
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO collected (delivery_id, collected_at) VALUES (?, ?)", (delivery_id, now())
+        )
+        return cur.rowcount == 1

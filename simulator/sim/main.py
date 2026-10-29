@@ -5,6 +5,9 @@ FastAPI app for the simulator:
 
   POST /webhook              where the bridge delivers ticket events (set
                              this as the system's base_url in the bridge)
+  POST /api/inbox/collect    pull mode: collect waiting messages from the
+                             bridge's inbox now (a background loop also does
+                             it every SIM_POLL_SECONDS - see collect_inbox)
   /api/tickets...            the frontend's ticket list, detail, create and
                              reply - create/reply call the bridge's
                              POST /api/v1/events
@@ -15,10 +18,13 @@ Endpoints are plain `def` (FastAPI runs them in a threadpool): sqlite3
 and the httpx calls to the bridge are synchronous, and a single-user dev
 tool doesn't need more.
 """
+import asyncio
 import hmac
-from contextlib import asynccontextmanager
+import logging
+import os
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
@@ -28,10 +34,34 @@ from sim import bridge, store
 from sim.contract import InboundTicketEvent, Status
 
 
+logger = logging.getLogger(__name__)
+
+POLL_SECONDS = float(os.environ.get("SIM_POLL_SECONDS", "5"))
+
+# Outcome of the latest inbox collection, shown in Settings.
+inbox_status: dict[str, Any] = {"last_collected_at": None, "last_count": 0, "last_error": None}
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     store.init()
+    poller = asyncio.create_task(_poll_inbox_forever())
     yield
+    poller.cancel()
+    with suppress(asyncio.CancelledError):
+        await poller
+
+
+async def _poll_inbox_forever() -> None:
+    """In pull mode, collects from the bridge's inbox every POLL_SECONDS; idle in push mode."""
+    while True:
+        await asyncio.sleep(POLL_SECONDS)
+        if store.get_settings()["delivery_mode"] != "pull":
+            continue
+        try:
+            await asyncio.to_thread(collect_inbox)
+        except bridge.BridgeError as exc:
+            logger.warning("Inbox collection failed: %s", exc.detail)
 
 
 app = FastAPI(title="Ticket Bridge Simulator", lifespan=lifespan)
@@ -81,6 +111,48 @@ def _receive(settings: dict[str, str], event: InboundTicketEvent) -> dict[str, A
         system=event.source_system, metadata=event.metadata,
     )
     return {"received": True, "ref": ticket["ref"]}
+
+
+# --- inbox (pull mode: simulator <- bridge, initiated by the simulator) -------
+
+def collect_inbox() -> int:
+    """
+    Collects every waiting message from the bridge's inbox, exactly as a
+    real pull-mode adapter should: process each message, remember its
+    delivery_id (the bridge redelivers anything not acknowledged, so the
+    same one can arrive twice - it's processed once), then acknowledge.
+    Returns how many new messages were processed.
+    """
+    settings = store.get_settings()
+    new = 0
+    try:
+        while True:
+            page = bridge.fetch_inbox(settings)
+            delivery_ids = []
+            for item in page["items"]:
+                if store.mark_collected(item["delivery_id"]):
+                    _receive(settings, InboundTicketEvent(**item["message"]))
+                    new += 1
+                delivery_ids.append(item["delivery_id"])
+            if delivery_ids:
+                bridge.ack_inbox(settings, delivery_ids)
+            if not page["has_more"] or not delivery_ids:
+                break
+    except bridge.BridgeError as exc:
+        inbox_status.update(last_error=exc.detail)
+        raise
+    inbox_status.update(last_collected_at=store.now(), last_count=new, last_error=None)
+    return new
+
+
+@app.post("/api/inbox/collect")
+def collect_now() -> dict[str, Any]:
+    if store.get_settings()["delivery_mode"] != "pull":
+        raise HTTPException(status_code=409, detail="This simulator receives messages by webhook - switch to collecting them in Settings.")
+    try:
+        return {"collected": collect_inbox()}
+    except bridge.BridgeError as exc:
+        raise HTTPException(status_code=502, detail=exc.detail) from exc
 
 
 # --- tickets (frontend -> simulator -> bridge) ------------------------------
@@ -170,6 +242,7 @@ class ConfigUpdate(BaseModel):
     ref_prefix: str = Field(default="SIM", min_length=1)
     default_topic: str = ""
     inbound_header: str = "X-API-Key"
+    delivery_mode: Literal["push", "pull"] = "push"
     # Secrets: None or "" keeps the stored value; the clear_* flags remove it.
     api_key: str | None = None
     inbound_secret: str | None = None
@@ -181,6 +254,7 @@ def _public_config() -> dict[str, Any]:
     settings = store.get_settings()
     public = {k: v for k, v in settings.items() if k not in store.SECRET_SETTINGS}
     public.update({f"{k}_set": bool(settings[k]) for k in store.SECRET_SETTINGS})
+    public["inbox"] = dict(inbox_status, poll_seconds=POLL_SECONDS)
     return public
 
 

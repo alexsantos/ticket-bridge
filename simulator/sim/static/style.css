@@ -209,6 +209,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
 }
 
 .ticket-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+.segmented-block { margin: 0 0 10px; }
 
 .ticket-row {
     position: relative;

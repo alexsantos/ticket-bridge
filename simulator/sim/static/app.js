@@ -416,6 +416,35 @@ newForm.addEventListener("submit", async (e) => {
 // Settings
 // ---------------------------------------------------------------------------
 const configForm = $("form-config");
+let deliveryMode = "push";
+
+function setDeliveryMode(mode) {
+    deliveryMode = mode;
+    document.querySelectorAll("#delivery-mode > button").forEach((b) => {
+        b.setAttribute("aria-checked", String(b.dataset.value === mode));
+    });
+    $("push-settings").hidden = mode !== "push";
+    $("pull-settings").hidden = mode !== "pull";
+}
+document.querySelectorAll("#delivery-mode > button").forEach((b) => {
+    b.addEventListener("click", () => setDeliveryMode(b.dataset.value));
+});
+
+function renderInboxStatus() {
+    const inbox = config.inbox ?? {};
+    const last = $("inbox-last");
+    if (inbox.last_error) {
+        last.textContent = "Failed";
+        $("inbox-hint").textContent = inbox.last_error;
+        $("inbox-hint").className = "group-footer is-error";
+        return;
+    }
+    last.textContent = inbox.last_collected_at
+        ? `${formatRelative(inbox.last_collected_at)}, ${inbox.last_count} new`
+        : "Not yet";
+    $("inbox-hint").innerHTML = `Like a system the bridge can't reach: every ${escapeHtml(inbox.poll_seconds ?? 5)} s it reads its messages from the bridge's inbox (<code>GET /api/v1/inbox</code>) with its API key and confirms each one. In the bridge, set this system to "It collects them".`;
+    $("inbox-hint").className = "group-footer";
+}
 
 async function loadConfig() {
     config = await api("config");
@@ -424,7 +453,9 @@ async function loadConfig() {
 
 function renderIdentity() {
     $("identity-name").textContent = config.system_code || "No system code";
-    $("identity-bridge").textContent = config.bridge_url ? `Bridge at ${config.bridge_url}` : "No bridge set";
+    $("identity-bridge").textContent = config.bridge_url
+        ? `${config.delivery_mode === "pull" ? "Collects from" : "Bridge at"} ${config.bridge_url}`
+        : "No bridge set";
     $("identity-avatar").textContent = initials(config.system_code || "S");
 }
 
@@ -442,6 +473,8 @@ async function openSettings() {
         : "None, every message is accepted";
     configForm.clear_inbound_secret.checked = false;
     $("clear-inbound-secret-field").hidden = !config.inbound_secret_set;
+    setDeliveryMode(config.delivery_mode || "push");
+    renderInboxStatus();
     $("webhook-url").textContent = new URL("webhook", location.href.split("#")[0]).href;
     $("ref-example").textContent = `${config.ref_prefix || "SIM"}-0001`;
     resetTestResult();
@@ -474,6 +507,7 @@ configForm.addEventListener("submit", async (e) => {
                 api_key: configForm.api_key.value || null,
                 inbound_secret: configForm.inbound_secret.value || null,
                 clear_inbound_secret: configForm.clear_inbound_secret.checked,
+                delivery_mode: deliveryMode,
             }),
         });
         renderIdentity();
@@ -504,6 +538,22 @@ $("btn-test").addEventListener("click", async (e) => {
         out.textContent = err.message;
         out.classList.add("is-error");
     } finally {
+        button.disabled = false;
+    }
+});
+
+$("btn-collect").addEventListener("click", async (e) => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+        const result = await api("inbox/collect", { method: "POST" });
+        toast(result.collected ? `Collected ${result.collected} new ${result.collected === 1 ? "message" : "messages"}` : "No new messages");
+        await loadTickets();
+    } catch (err) {
+        toast(err.message, "error");
+    } finally {
+        config = await api("config");
+        renderInboxStatus();
         button.disabled = false;
     }
 });

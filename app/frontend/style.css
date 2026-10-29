@@ -363,6 +363,9 @@ p code, .group-footer code {
     font-weight: 600;
 }
 
+.segmented-block { display: flex; margin: 0 0 10px; }
+.segmented-block > button { flex: 1; }
+
 .filter-chip {
     display: inline-flex;
     align-items: center;

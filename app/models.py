@@ -21,7 +21,9 @@ from app.schemas import CanonicalStatus
 class System(BaseModel):
     code: str
     name: str
-    base_url: str
+    delivery_mode: Literal["push", "pull"]
+    base_url: str | None
+    last_polled_at: datetime | None
     auth_config: dict[str, Any]
     verify_tls: bool
     active: bool

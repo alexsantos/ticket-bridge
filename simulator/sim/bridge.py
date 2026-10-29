@@ -2,8 +2,9 @@
 bridge.py
 ---------
 The simulator's only outbound calls to Ticket Bridge: POST /api/v1/events
-(authenticated with this system's inbound API key, exactly as a real
-integrating system would) and GET /health for the Config page's
+and, in pull mode, GET /api/v1/inbox + POST /api/v1/inbox/ack (all
+authenticated with this system's inbound API key, exactly as a real
+integrating system would), and GET /health for the Settings page's
 connection test. No admin endpoints - the simulator never needs an admin
 session.
 """
@@ -27,16 +28,16 @@ def _url(settings: dict[str, str], path: str) -> str:
     return settings["bridge_url"].rstrip("/") + path
 
 
-def post_event(settings: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
-    """Sends an IncomingEvent; returns the bridge's response ({conversation_id, created_outbox_ids})."""
+def _call(settings: dict[str, str], method: str, path: str, **kwargs: Any) -> httpx.Response:
+    """An authenticated call to the bridge; raises BridgeError with a UI-safe reason."""
     if not settings["api_key"]:
-        raise BridgeError("No API key configured - set it on the Config page.")
+        raise BridgeError("No API key configured - set it in Settings.")
     try:
-        response = httpx.post(
-            _url(settings, "/api/v1/events"),
-            json=body,
+        response = getattr(httpx, method)(
+            _url(settings, path),
             headers={"X-API-Key": settings["api_key"]},
             timeout=TIMEOUT_SECONDS,
+            **kwargs,
         )
     except httpx.RequestError as exc:
         raise BridgeError(f"Could not reach the bridge at {settings['bridge_url']}: {exc}") from exc
@@ -47,7 +48,22 @@ def post_event(settings: dict[str, str], body: dict[str, Any]) -> dict[str, Any]
         except ValueError:
             detail = response.text
         raise BridgeError(f"Bridge returned HTTP {response.status_code}: {detail}", response.status_code)
-    return response.json()
+    return response
+
+
+def post_event(settings: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
+    """Sends an IncomingEvent; returns the bridge's response ({conversation_id, created_outbox_ids})."""
+    return _call(settings, "post", "/api/v1/events", json=body).json()
+
+
+def fetch_inbox(settings: dict[str, str], limit: int = 50) -> dict[str, Any]:
+    """Pull mode: this system's waiting messages, oldest first ({items, has_more})."""
+    return _call(settings, "get", "/api/v1/inbox", params={"limit": limit}).json()
+
+
+def ack_inbox(settings: dict[str, str], delivery_ids: list[int]) -> dict[str, Any]:
+    """Pull mode: confirms these messages were processed, so the bridge stops offering them."""
+    return _call(settings, "post", "/api/v1/inbox/ack", json={"delivery_ids": delivery_ids}).json()
 
 
 def check_health(settings: dict[str, str]) -> str:

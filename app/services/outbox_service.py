@@ -56,6 +56,9 @@ async def fetch_pending_batch(conn: AsyncConnection, *, limit: int) -> list[dict
     using SKIP LOCKED so that concurrent /sync invocations never grab the
     same row.
 
+    Rows for a pull system (systems.delivery_mode = 'pull') are skipped:
+    that system collects them itself from its inbox (list_inbox below).
+
     Note: this runs INSIDE a transaction that the caller must keep open
     until the rows are marked sent/failed (see dispatcher.py).
     """
@@ -65,6 +68,9 @@ async def fetch_pending_batch(conn: AsyncConnection, *, limit: int) -> list[dict
             SELECT id, conversation_id, destination, source, payload, attempts, max_attempts
             FROM outbox
             WHERE status = 'pending' AND attempts < max_attempts
+              AND NOT EXISTS (
+                  SELECT 1 FROM systems s WHERE s.code = outbox.destination AND s.delivery_mode = 'pull'
+              )
             ORDER BY id
             FOR UPDATE SKIP LOCKED
             LIMIT %(limit)s
@@ -193,5 +199,42 @@ async def requeue_failed(conn: AsyncConnection, *, outbox_ids: list[int]) -> lis
                       previous.attempts AS previous_attempts, previous.last_error AS previous_error
             """,
             {"ids": outbox_ids},
+        )
+        return await cur.fetchall()
+
+
+async def list_inbox(conn: AsyncConnection, *, destination: str, limit: int) -> tuple[list[dict[str, Any]], bool]:
+    """
+    A pull system's waiting messages: its pending outbox rows, oldest
+    first. Returns (rows, has_more). Rows stay pending until acknowledged
+    (ack_inbox), so a system that crashes mid-batch gets them again.
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT id, payload, created_at FROM outbox
+            WHERE destination = %(destination)s AND status = 'pending'
+            ORDER BY id
+            LIMIT %(limit)s
+            """,
+            {"destination": destination, "limit": limit + 1},
+        )
+        rows = await cur.fetchall()
+    return rows[:limit], len(rows) > limit
+
+
+async def ack_inbox(conn: AsyncConnection, *, destination: str, outbox_ids: list[int]) -> list[dict[str, Any]]:
+    """
+    Marks the given messages delivered ('sent') - only `destination`'s own
+    pending rows; anything else is left alone and not returned.
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            UPDATE outbox SET status = 'sent', processed_at = now()
+            WHERE id = ANY(%(ids)s) AND destination = %(destination)s AND status = 'pending'
+            RETURNING id, conversation_id
+            """,
+            {"ids": outbox_ids, "destination": destination},
         )
         return await cur.fetchall()

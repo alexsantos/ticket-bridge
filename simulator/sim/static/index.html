@@ -228,6 +228,23 @@
 
                 <section class="group">
                     <h3 class="group-title">Messages from the bridge</h3>
+                    <div class="segmented segmented-block" role="radiogroup" aria-label="How messages arrive" id="delivery-mode">
+                        <button type="button" role="radio" data-value="push">The bridge sends them</button>
+                        <button type="button" role="radio" data-value="pull">Collect them</button>
+                    </div>
+                    <div id="pull-settings" hidden>
+                        <div class="list form-list">
+                            <div class="form-row">
+                                <span class="form-label">Last collected</span>
+                                <span class="form-value" id="inbox-last"></span>
+                            </div>
+                            <button type="button" class="list-button" id="btn-collect">
+                                <svg class="icon"><use href="#i-wifi"/></svg><span>Collect now</span>
+                            </button>
+                        </div>
+                        <p class="group-footer" id="inbox-hint">Like a system the bridge can't reach: it reads its messages from the bridge's inbox (<code>GET /api/v1/inbox</code>) with its API key and confirms each one. In the bridge, set this system to "It collects them".</p>
+                    </div>
+                    <div id="push-settings">
                     <div class="list form-list">
                         <div class="form-row">
                             <span class="form-label">Webhook</span>
@@ -248,6 +265,7 @@
                         </label>
                     </div>
                     <p class="group-footer">Set this system's webhook URL in the bridge to the one above, or under docker compose to <code>http://simulator-a:8090/webhook</code> / <code>http://simulator-b:8090/webhook</code>. If the bridge sends a secret, enter exactly what it sends, prefix included (e.g. <code>Bearer abc123</code>). Messages that don't match are refused, which shows up in the bridge as a failed delivery.</p>
+                    </div>
                 </section>
             </div>
         </form>

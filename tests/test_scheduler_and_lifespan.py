@@ -91,6 +91,7 @@ def test_domain_models_accept_database_rows():
     from app.models import System
 
     now = datetime.now(timezone.utc)
-    system = System(code="a", name="A", base_url="https://a", auth_config={}, verify_tls=True,
+    system = System(code="a", name="A", delivery_mode="push", base_url="https://a", last_polled_at=None,
+                    auth_config={}, verify_tls=True,
                     active=True, topics=["INFRA"], created_at=now, updated_at=now)
     assert system.topics == ["INFRA"]

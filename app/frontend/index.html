@@ -308,21 +308,36 @@
                 </section>
 
                 <section class="group">
-                    <h3 class="group-title">Where the bridge sends messages</h3>
-                    <div class="list form-list">
-                        <label class="form-row form-row-stacked">
-                            <span class="form-label">Webhook URL</span>
-                            <input type="url" name="base_url" required placeholder="Required, e.g. https://helpdesk.example.org/webhook" autocapitalize="off" spellcheck="false">
-                        </label>
-                        <label class="form-row form-row-switch">
-                            <span class="form-label">Accept a self-signed certificate</span>
-                            <input type="checkbox" class="switch" name="skip_tls_verify">
-                        </label>
+                    <h3 class="group-title">How this system receives messages</h3>
+                    <div class="segmented segmented-block" role="radiogroup" aria-label="How this system receives messages" id="delivery-mode">
+                        <button type="button" role="radio" data-value="push">The bridge sends them</button>
+                        <button type="button" role="radio" data-value="pull">It collects them</button>
                     </div>
-                    <p class="group-footer">Only turn this on if the webhook uses HTTPS with a certificate no trusted authority signed. The connection stays encrypted, but the bridge can't confirm who it's talking to.</p>
+                    <div id="push-settings">
+                        <div class="list form-list">
+                            <label class="form-row form-row-stacked">
+                                <span class="form-label">Webhook URL</span>
+                                <input type="url" name="base_url" placeholder="Required, e.g. https://helpdesk.example.org/webhook" autocapitalize="off" spellcheck="false">
+                            </label>
+                            <label class="form-row form-row-switch">
+                                <span class="form-label">Accept a self-signed certificate</span>
+                                <input type="checkbox" class="switch" name="skip_tls_verify">
+                            </label>
+                        </div>
+                        <p class="group-footer">The bridge posts each message to this URL. Only accept a self-signed certificate if the webhook uses HTTPS with a certificate no trusted authority signed: the connection stays encrypted, but the bridge can't confirm who it's talking to.</p>
+                    </div>
+                    <div id="pull-settings" hidden>
+                        <div class="list">
+                            <div class="row kv-row">
+                                <span class="kv-label">Last collected</span>
+                                <span class="kv-value" id="system-last-polled">Never</span>
+                            </div>
+                        </div>
+                        <p class="group-footer">For a system the bridge can't reach, e.g. one in a cloud that only makes outbound calls. It reads its messages from <code>GET /api/v1/inbox</code> and confirms each with <code>POST /api/v1/inbox/ack</code>, using its own key below. Messages wait in the bridge until confirmed. See README.md, "Receiving messages without a webhook".</p>
+                    </div>
                 </section>
 
-                <section class="group">
+                <section class="group" id="outbound-auth-section">
                     <h3 class="group-title">How the bridge signs in to this system</h3>
                     <p class="inline-warning" id="legacy-secret-ref-warning" hidden>
                         <svg class="icon"><use href="#i-alert"/></svg>

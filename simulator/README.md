@@ -99,10 +99,22 @@ side-effect-free way to validate it).
 
 Every setting can also be seeded from the environment on first start
 (`SIM_BRIDGE_URL`, `SIM_SYSTEM_CODE`, `SIM_API_KEY`, `SIM_REF_PREFIX`,
-`SIM_DEFAULT_TOPIC`, `SIM_INBOUND_HEADER`, `SIM_INBOUND_SECRET`); once
-saved from Settings, the saved value wins.
+`SIM_DEFAULT_TOPIC`, `SIM_INBOUND_HEADER`, `SIM_INBOUND_SECRET`,
+`SIM_DELIVERY_MODE`); once saved from Settings, the saved value wins.
+`SIM_POLL_SECONDS` (default 5) sets how often it collects in pull mode.
 
-**Webhook authentication (optional)**: if the bridge is configured to send
+**Collecting instead of a webhook (pull mode)**: to play a system the
+bridge can't reach, choose **Collect them** under *Messages from the
+bridge* in Settings, and set the same system in the bridge to *It
+collects them*. The simulator then never needs a webhook: every few
+seconds it reads `GET /api/v1/inbox` with its API key, files each message
+on its ticket exactly as a webhook delivery would, remembers the
+`delivery_id` so a redelivered message is applied once, and acknowledges
+with `POST /api/v1/inbox/ack`. Settings shows when it last collected (or
+the error), and **Collect now** does it immediately. `sim/main.py`'s
+`collect_inbox` is a compact reference for a real adapter.
+
+**Webhook authentication (optional, push mode)**: if the bridge is configured to send
 a secret to this system (*How the bridge signs in to this system* in its
 settings: header, value prefix, secret), set the same header and
 the exact value it sends (prefix included, e.g. `Bearer abc123`). Deliveries

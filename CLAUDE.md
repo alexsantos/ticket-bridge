@@ -685,6 +685,52 @@ Settings and New ticket as sheets. Still its own copy of the styles,
 never imported from `app/frontend` (Decision 12). Screenshots of both
 are in `docs/screenshots/`, used by README.md.
 
+## Decision 18 — Pull delivery: a system can collect its messages instead of a webhook
+
+**Problem closed**: a system hosted by a cloud provider couldn't expose
+any URL the bridge could call, so push delivery was impossible. Its
+team worked around it by logging in to the admin API and polling
+`/api/v1/conversations` - an admin password in integration code, admin
+power for a machine caller, no notion of "what's new", and its outbox
+rows failing five times each against a URL that didn't exist.
+
+**Decision made** (`migrations/010_pull_delivery_mode.sql`,
+`app/api/inbox.py`): `systems.delivery_mode` - `push` (default, as
+before) or `pull`. A pull system needs no `base_url`; the sync skips its
+outbox rows (`fetch_pending_batch`), and it reads them itself:
+`GET /api/v1/inbox` (oldest first, `has_more`) and
+`POST /api/v1/inbox/ack`, authenticated with its own inbound API key -
+the same one it uses for `POST /api/v1/events`.
+
+- **The outbox *is* the inbox.** No new table or queue: a pull system's
+  pending rows are its waiting messages, and acknowledging marks them
+  `sent` (audited as `delivery_success` with `collected: true`). So
+  fan-out, topics, Deliveries, Retry, the audit trail and the thread
+  view all work unchanged.
+- **Same contract.** Each item wraps the exact `OutboundTicketEvent` a
+  webhook receives (Decision 4), plus the `delivery_id` to acknowledge.
+- **At-least-once, explicit ack.** A message stays waiting until
+  acknowledged, so a crash mid-batch loses nothing; the system must
+  process each `delivery_id` once. Chosen over a cursor ("give me
+  everything after id N"), which would need per-system cursor state and
+  can't express "processed some of these".
+- **One mode at a time.** A push system gets `409` from the inbox, so
+  a message is never both pushed and collected. Switching a system back
+  to push simply lets the sync deliver whatever was waiting.
+- **Visible when it stops.** Every inbox call records
+  `systems.last_polled_at`; the admin panel flags an active pull system
+  that hasn't collected in 15 minutes, since "stopped polling" otherwise
+  looks exactly like "nothing to deliver".
+- **The simulator collects too** (Settings → *Collect them*), as a
+  reference adapter: poll, process, remember the `delivery_id`, then
+  acknowledge.
+
+**Consciously not done**: long polling (`?wait=`), and leases for
+several concurrent pollers on one system (`FOR UPDATE SKIP LOCKED` plus a
+visibility timeout) - both natural next steps in `inbox.py` once there's
+a need. Pull messages never "fail": they wait until collected, with no
+`max_attempts`.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the

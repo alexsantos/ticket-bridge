@@ -127,6 +127,40 @@ identical for every system, always:
   *Setup › Topics* in the admin panel) first; that's the documented (not enforced) contract for
   `metadata` on that topic. See CLAUDE.md Decision 4.
 
+### Receiving messages without a webhook
+
+If your system can't expose a URL the bridge can reach - e.g. it runs in
+a cloud that only allows outbound calls - ask the bridge's admin to set it
+to **"It collects them"** (*Setup › Systems*, or `"delivery_mode":
+"pull"`). The bridge then never calls you; your messages wait in an inbox
+you read with your usual `X-API-Key`:
+
+```
+GET /api/v1/inbox?limit=50            → oldest first
+{
+  "items": [
+    {"delivery_id": 123, "queued_at": "2026-10-29T10:15:02Z",
+     "message": { …exactly the payload above… }}
+  ],
+  "has_more": false
+}
+
+POST /api/v1/inbox/ack                 ← once you've processed them
+{"delivery_ids": [123]}
+→ {"acknowledged": [123], "skipped": []}
+```
+
+A message stays in the inbox until you acknowledge it, so nothing is lost
+if you crash halfway through a batch - you'll get it again next time.
+That means you can see the same `delivery_id` twice: **process each
+`delivery_id` once and acknowledge it again** (that's safe). While
+`has_more` is true, acknowledge and call again. Poll every few seconds to a
+minute - the bridge records each call, and its admin panel flags a system
+that hasn't collected in 15 minutes. A system set to receive by webhook
+gets `409` from the inbox, so a message is never both pushed and collected.
+The simulator's *Collect them* mode (`simulator/README.md`) is a working
+example.
+
 ### Reporting your own ticket / status changes
 
 `POST /api/v1/events`, authenticated with your system's API key
@@ -181,8 +215,8 @@ flowchart LR
 
 | | Credential | Direction | Who creates it | Stored as | To rotate |
 |---|---|---|---|---|---|
-| ① | **Inbound API key** | system → bridge | The bridge generates it (Systems → system → *+ Generate key*), shown once; you hand it to that system's team | SHA-256 hash only | Generate a new one, then *Revoke* the old |
-| ② | **Outbound secret** | bridge → system | That system's team decides (whatever their webhook checks); you enter it in the system's settings (*Setup › Systems*) | Encrypted with ④ | Type the new value, *Save* |
+| ① | **Inbound API key** | system → bridge (also reads its inbox, if it collects its messages) | The bridge generates it (Systems → system → *+ Generate key*), shown once; you hand it to that system's team | SHA-256 hash only | Generate a new one, then *Revoke* the old |
+| ② | **Outbound secret** | bridge → system (webhook systems only) | That system's team decides (whatever their webhook checks); you enter it in the system's settings (*Setup › Systems*) | Encrypted with ④ | Type the new value, *Save* |
 | ③ | **Admin password** | admin → admin panel | You (seeded as `admin` / `ChangeMe-Immediately!` - change it) | bcrypt hash | *Account › Change password* |
 | ④ | **`SECRETS_ENCRYPTION_KEY`** | never sent anywhere | You, once per deployment, in `.env` | Only in the environment | Don't: changing it means re-entering every ② |
 
@@ -266,6 +300,7 @@ ticket-bridge/
 │   ├── security.py              # authentication (API keys, sync trigger secret, admin sessions)
 │   ├── api/
 │   │   ├── events.py            # POST /api/v1/events   (inbound)
+│   │   ├── inbox.py             # GET /api/v1/inbox, POST .../ack (pull systems collect their messages)
 │   │   ├── sync.py              # POST /api/v1/sync     (manual/on-demand outbox trigger)
 │   │   ├── auth.py              # POST /api/v1/auth/login, /logout, /change-password, GET /me
 │   │   ├── systems.py           # CRUD /api/v1/systems  (configuration + topic subscriptions +
@@ -298,7 +333,8 @@ ticket-bridge/
 │   ├── 006_stored_outbound_secrets.sql     # encrypted outbound secret column on systems
 │   ├── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
 │   ├── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
-│   └── 009_overall_status_follows_latest_event.sql # backfills each conversation's status from its latest event
+│   ├── 009_overall_status_follows_latest_event.sql # backfills each conversation's status from its latest event
+│   └── 010_pull_delivery_mode.sql          # systems that collect their messages instead of a webhook
 ├── tests/
 │   ├── conftest.py              # real Postgres per test (Docker or TEST_DATABASE_URL), app client fixtures
 │   ├── helpers.py               # seeded keys/credentials, send_event(), query()
@@ -360,6 +396,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/006_stored_outbound_sec
 psql "postgresql://localhost/ticketbridge" -f migrations/007_retire_secret_ref.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/008_per_system_tls_verification.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/009_overall_status_follows_latest_event.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/010_pull_delivery_mode.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -734,6 +771,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/008_per_system_tls_verification.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/009_overall_status_follows_latest_event.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/010_pull_delivery_mode.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
@@ -974,6 +1013,11 @@ defense-in-depth on top of the above, rather than the only mechanism.
 - **Adding a new system (e.g. a 3rd team)**: *Setup › Systems* → *Add
   system*. Requires no code deployment. Until every system has a topic
   and a key, the Overview screen lists what's missing.
+- **A system the bridge can't reach** (no public URL): under *How this
+  system receives messages*, choose *It collects them*. It then reads its
+  messages from its inbox with its own key ("Receiving messages without a
+  webhook" above); its waiting messages show as *Waiting to be collected*,
+  and Overview warns if it hasn't collected for 15 minutes.
 - **Adding a new topic / changing subscriptions**: *Setup › Topics* →
   *Add topic*; turn it on or off under *Topics this system receives* in a
   system's settings to change what that system receives. Both are no-deploy configuration

@@ -3,8 +3,9 @@ security.py
 -----------
 Authentication of inbound calls:
 
-  1. POST /api/v1/events - authenticated with a per-system API key
-     (api_keys table), sent in the `X-API-Key` header.
+  1. POST /api/v1/events, and GET/POST /api/v1/inbox for a pull system -
+     authenticated with a per-system API key (api_keys table), sent in
+     the `X-API-Key` header.
   2. POST /api/v1/sync (manual sync trigger) - an admin session (as in 3),
      or, only if SCHEDULER_SHARED_SECRET is configured, that secret in the
      `X-Scheduler-Secret` header, for a caller that can't log in (Cloud
