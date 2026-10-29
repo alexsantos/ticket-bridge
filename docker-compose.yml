@@ -10,7 +10,8 @@
 # 003_standardize_ticket_status, 004_unify_auth_mechanism,
 # 005_admin_authentication, 006_stored_outbound_secrets,
 # 007_retire_secret_ref, 008_per_system_tls_verification,
-# 009_overall_status_follows_latest_event, 010_pull_delivery_mode) is exactly the
+# 009_overall_status_follows_latest_event, 010_pull_delivery_mode,
+# 011_archive_and_delete_systems) is exactly the
 # sequence README.md section 3.2
 # has you run by hand, so `docker compose up` reproduces it automatically
 # - seed data (002) included, since this is a local/dev stack (005's

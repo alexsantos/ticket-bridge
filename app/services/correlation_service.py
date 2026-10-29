@@ -146,8 +146,9 @@ async def list_fanout_destinations(
     conn: AsyncConnection, *, conversation_id: UUID, topic_code: str, exclude: str
 ) -> list[dict[str, Any]]:
     """
-    Lists the fan-out destinations for a conversation: every active system
-    subscribed to `topic_code`, except `exclude` (the event's source).
+    Lists the fan-out destinations for a conversation: every active,
+    non-archived system subscribed to `topic_code`, except `exclude` (the
+    event's source).
 
     Destinations are driven strictly by current topic subscriptions, not by
     prior participation - a system that unsubscribes from a topic stops
@@ -173,7 +174,7 @@ async def list_fanout_destinations(
                 ON sub.system_code = s.code AND sub.topic_code = %(topic_code)s
             LEFT JOIN conversation_participants cp
                 ON cp.conversation_id = %(cid)s AND cp.system_code = s.code
-            WHERE s.active = TRUE AND s.code != %(exclude)s
+            WHERE s.active = TRUE AND s.archived_at IS NULL AND s.code != %(exclude)s
             """,
             {"cid": conversation_id, "topic_code": topic_code, "exclude": exclude},
         )

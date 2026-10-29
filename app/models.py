@@ -27,6 +27,7 @@ class System(BaseModel):
     auth_config: dict[str, Any]
     verify_tls: bool
     active: bool
+    archived_at: datetime | None = None
     topics: list[str]
     created_at: datetime
     updated_at: datetime

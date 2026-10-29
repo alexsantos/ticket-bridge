@@ -604,6 +604,7 @@ button.pill:hover { background: var(--fill-strong); color: var(--label); }
 .row[aria-checked="true"] .select-circle { background: var(--accent); border-color: var(--accent); }
 .row[aria-checked="true"] .select-circle .icon { visibility: visible; }
 .row.is-unselectable { opacity: 0.45; cursor: default; }
+.row.is-archived .avatar, .row.is-archived .row-title { opacity: 0.5; }
 .row.is-unselectable:hover { background: none; }
 
 /* Buttons that are themselves a row (Settings-style actions) */
@@ -627,7 +628,8 @@ button.pill:hover { background: var(--fill-strong); color: var(--label); }
 .list-button:disabled { color: var(--label-3); cursor: default; background: none; }
 .list-button-destructive { color: var(--red); justify-content: center; }
 .list-button-centered { justify-content: center; }
-.list-button + .list-button::before,
+/* Only between visible buttons - a hidden one mustn't leave a line behind. */
+.list-button:not([hidden]) ~ .list-button:not([hidden])::before,
 .form-row + .list-button::before {
     content: "";
     position: absolute;

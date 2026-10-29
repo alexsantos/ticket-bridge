@@ -240,6 +240,7 @@
                 </div>
                 <div id="setup-systems">
                     <div class="list" id="list-systems"></div>
+                    <div class="load-more-row"><button type="button" class="text-btn" id="btn-toggle-archived" hidden></button></div>
                     <p class="group-footer">A system is one team's support application. The bridge sends it messages on the topics it subscribes to, and accepts messages from it with its own key.</p>
                 </div>
                 <div id="setup-topics" hidden>
@@ -384,6 +385,16 @@
                         </button>
                     </div>
                     <p class="group-footer">Sent by this system as <code>X-API-Key</code> on <code>POST /api/v1/events</code>. A new key is shown once, right after it's generated. Hand it to the system's team.</p>
+                </section>
+
+                <!-- Only when editing: retire the system -->
+                <section class="group" id="system-retire-section" hidden>
+                    <div class="list">
+                        <button type="button" class="list-button list-button-centered" id="btn-unarchive-system">Unarchive system</button>
+                        <button type="button" class="list-button list-button-destructive" id="btn-archive-system">Archive system</button>
+                        <button type="button" class="list-button list-button-destructive" id="btn-delete-system">Delete system</button>
+                    </div>
+                    <p class="group-footer" id="system-retire-footer"></p>
                 </section>
             </div>
         </form>

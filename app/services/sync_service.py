@@ -43,9 +43,10 @@ async def run_sync_batch() -> dict:
             for entry in batch:
                 destination_system = await _get_system_config(conn, entry["destination"])
 
-                if destination_system is None or not destination_system["active"]:
+                if (destination_system is None or not destination_system["active"]
+                        or destination_system["archived_at"] is not None):
                     await outbox_service.mark_failed(
-                        conn, outbox_id=entry["id"], error="Destination system inactive or nonexistent."
+                        conn, outbox_id=entry["id"], error="Destination system inactive, archived or nonexistent."
                     )
                     failures += 1
                     detail.append({"outbox_id": entry["id"], "result": "inactive_system_failure"})
@@ -116,7 +117,7 @@ def resolve_outbound_secret(system: dict) -> str | None:
 async def _get_system_config(conn, code: str) -> dict | None:
     async with conn.cursor() as cur:
         await cur.execute(
-            "SELECT code, base_url, auth_config, outbound_secret_encrypted, verify_tls, active "
+            "SELECT code, base_url, auth_config, outbound_secret_encrypted, verify_tls, active, archived_at "
             "FROM systems WHERE code = %(code)s",
             {"code": code},
         )

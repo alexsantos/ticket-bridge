@@ -238,6 +238,16 @@ class SystemOut(BaseModel):
         description="Whether an outbound secret is stored (encrypted). The secret itself "
                     "is never returned by this API.",
     )
+    archived_at: datetime | None = Field(
+        default=None,
+        description="Set while the system is archived: hidden, can't send or receive, history kept. "
+                    "See CLAUDE.md Decision 19.",
+    )
+    deletable: bool = Field(
+        default=False,
+        description="Whether DELETE is allowed: the system never exchanged a message "
+                    "(no tickets, no deliveries). Otherwise archive it.",
+    )
     has_legacy_secret_ref: bool = Field(
         default=False,
         description="The system still has an auth_config.secret_ref from before 0.8.0, "

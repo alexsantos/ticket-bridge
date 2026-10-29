@@ -731,6 +731,44 @@ visibility timeout) - both natural next steps in `inbox.py` once there's
 a need. Pull messages never "fail": they wait until collected, with no
 `max_attempts`.
 
+## Decision 19 — Retiring systems: archive keeps history, delete only what has none
+
+**Problem closed**: there was no way to remove a system. Systems created
+for tests or no longer used piled up in every list and filter, and a
+plain `DELETE` failed for anything that had ever exchanged a message
+(conversations, deliveries and the audit log all reference it) - and even
+for unused ones, because every system has audit rows from its own
+creation and keys.
+
+**Decision made** (`migrations/011_archive_and_delete_systems.sql`):
+
+- **Archive** (`POST /api/v1/systems/{code}/archive`, any system):
+  `systems.archived_at` is set and the system switched off. Its keys are
+  refused with `403` (`authenticate_system`, so sending and collecting
+  both stop), fan-out skips it even if someone switches it back on, and
+  the sync treats queued messages to it like an inactive destination's.
+  Nothing is deleted. The admin panel hides archived systems from lists,
+  filters, topic subscriber counts and the setup checklist, behind a
+  *Show archived* toggle; the API still returns them (with `archived_at`),
+  so names keep resolving in threads, deliveries and activity.
+  **Unarchive** clears it but leaves the system inactive - nothing
+  reaches it until an admin switches it on deliberately.
+- **Delete** (`DELETE /api/v1/systems/{code}`) only for a system that
+  never exchanged a message: no `conversation_participants` rows and no
+  `outbox` rows in either direction (`SystemOut.deletable`). Otherwise
+  `409` - deleting it would cut those conversations' history - and the
+  panel offers Archive instead. Keys and subscriptions cascade.
+- **The audit log no longer has a foreign key to systems.** It's
+  append-only history and has to outlive what it describes; rows keep
+  the system code as text, and `system_deleted` records the name. The
+  foreign keys from `conversation_participants` and `outbox` stay - they
+  are what makes "has messages" un-deletable.
+
+**Consciously not done**: no bulk archive/delete, and no purge of an
+archived system's history - if a development database needs scrubbing,
+that's plain SQL against `outbox`, `conversation_participants` and
+`audit_log`, done deliberately by hand.
+
 ## What this skeleton assumes and leaves undecided
 
 - **Field-conflict reconciliation** (who "wins" when both systems write the

@@ -34,6 +34,9 @@ router = APIRouter(prefix="/api/v1/systems", tags=["systems"], dependencies=[Dep
 _SELECT_SYSTEM_COLUMNS = """
     s.code, s.name, s.delivery_mode, s.base_url, s.last_polled_at, s.verify_tls, s.active, s.auth_config,
     s.outbound_secret_encrypted IS NOT NULL AS has_secret,
+    s.archived_at,
+    NOT EXISTS (SELECT 1 FROM conversation_participants p WHERE p.system_code = s.code)
+        AND NOT EXISTS (SELECT 1 FROM outbox o WHERE s.code IN (o.destination, o.source)) AS deletable,
     s.created_at, s.updated_at,
     COALESCE(
         (SELECT array_agg(topic_code ORDER BY topic_code)
@@ -222,6 +225,81 @@ async def update_system(code: str, payload: SystemUpdate) -> SystemOut:
                 detail={"changed_fields": changed_fields},
             )
     return _row_to_system_out(row)
+
+
+@router.post("/{code}/archive", response_model=SystemOut)
+async def archive_system(code: str) -> SystemOut:
+    """
+    Retires a system without losing its history: it's switched off, hidden
+    from the admin panel's lists, excluded from fan-out, and its keys are
+    refused (403) until it's unarchived. See CLAUDE.md Decision 19.
+    """
+    return await _set_archived(code, archived=True)
+
+
+@router.post("/{code}/unarchive", response_model=SystemOut)
+async def unarchive_system(code: str) -> SystemOut:
+    """Brings an archived system back - still inactive, so nothing reaches it until an admin re-enables it."""
+    return await _set_archived(code, archived=False)
+
+
+async def _set_archived(code: str, *, archived: bool) -> SystemOut:
+    async with get_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE systems
+                    SET archived_at = CASE WHEN %(archived)s THEN COALESCE(archived_at, now()) END,
+                        active = CASE WHEN %(archived)s THEN FALSE ELSE active END
+                    WHERE code = %(code)s
+                    RETURNING code
+                    """,
+                    {"code": code, "archived": archived},
+                )
+                if await cur.fetchone() is None:
+                    raise HTTPException(status_code=404, detail="System not found.")
+                await cur.execute(
+                    f"SELECT {_SELECT_SYSTEM_COLUMNS} FROM systems s WHERE s.code = %(code)s", {"code": code}
+                )
+                row = await cur.fetchone()
+            await record_audit(
+                conn, system_code=code, event_type="system_archived" if archived else "system_unarchived", detail={}
+            )
+    return _row_to_system_out(row)
+
+
+@router.delete("/{code}", status_code=204)
+async def delete_system(code: str) -> None:
+    """
+    Deletes a system that never exchanged a message (no tickets, no
+    deliveries) - typically one created by mistake or for a test. Its keys
+    and topic subscriptions go with it; its audit rows stay (CLAUDE.md
+    Decision 19). A system with messages can only be archived: 409.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"SELECT {_SELECT_SYSTEM_COLUMNS} FROM systems s WHERE s.code = %(code)s FOR UPDATE",
+                    {"code": code},
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    raise HTTPException(status_code=404, detail="System not found.")
+                if not row["deletable"]:
+                    raise HTTPException(status_code=409, detail=_HAS_HISTORY)
+                try:
+                    await cur.execute("DELETE FROM systems WHERE code = %(code)s", {"code": code})
+                except psycopg.errors.ForeignKeyViolation as exc:  # a message arrived meanwhile
+                    raise HTTPException(status_code=409, detail=_HAS_HISTORY) from exc
+            await record_audit(conn, system_code=code, event_type="system_deleted", detail={"name": row["name"]})
+
+
+_HAS_HISTORY = (
+    "This system has exchanged messages, so deleting it would break those conversations' "
+    "history. Archive it instead."
+)
 
 
 @router.get("/{code}/api-keys", response_model=list[ApiKeyOut])

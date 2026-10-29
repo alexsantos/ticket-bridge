@@ -63,8 +63,9 @@ async def authenticate_system(x_api_key: str = Header(..., alias="X-API-Key")) -
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                SELECT system_code FROM api_keys
-                WHERE key_hash = %(hash)s AND active = TRUE
+                SELECT k.system_code, s.archived_at FROM api_keys k
+                JOIN systems s ON s.code = k.system_code
+                WHERE k.key_hash = %(hash)s AND k.active = TRUE
                 """,
                 {"hash": key_hash},
             )
@@ -74,6 +75,12 @@ async def authenticate_system(x_api_key: str = Header(..., alias="X-API-Key")) -
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or revoked API key.",
+        )
+    if row["archived_at"] is not None:
+        # The key is valid; the system is retired (CLAUDE.md Decision 19).
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"System '{row['system_code']}' is archived. Ask an admin to unarchive it.",
         )
     return row["system_code"]
 

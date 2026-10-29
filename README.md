@@ -334,7 +334,8 @@ ticket-bridge/
 │   ├── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
 │   ├── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
 │   ├── 009_overall_status_follows_latest_event.sql # backfills each conversation's status from its latest event
-│   └── 010_pull_delivery_mode.sql          # systems that collect their messages instead of a webhook
+│   ├── 010_pull_delivery_mode.sql          # systems that collect their messages instead of a webhook
+│   └── 011_archive_and_delete_systems.sql  # archived_at; audit_log no longer blocks deleting a system
 ├── tests/
 │   ├── conftest.py              # real Postgres per test (Docker or TEST_DATABASE_URL), app client fixtures
 │   ├── helpers.py               # seeded keys/credentials, send_event(), query()
@@ -397,6 +398,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/007_retire_secret_ref.s
 psql "postgresql://localhost/ticketbridge" -f migrations/008_per_system_tls_verification.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/009_overall_status_follows_latest_event.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/010_pull_delivery_mode.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/011_archive_and_delete_systems.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -773,6 +775,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/009_overall_status_follows_latest_event.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/010_pull_delivery_mode.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/011_archive_and_delete_systems.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
@@ -1018,6 +1022,16 @@ defense-in-depth on top of the above, rather than the only mechanism.
   messages from its inbox with its own key ("Receiving messages without a
   webhook" above); its waiting messages show as *Waiting to be collected*,
   and Overview warns if it hasn't collected for 15 minutes.
+- **Retiring a system**: open it in *Setup › Systems* and scroll to the
+  bottom. **Archive system** switches it off and hides it from lists and
+  filters: its keys are refused, it gets no messages, and its history
+  stays (*Show archived* below the list brings it back into view, and
+  *Unarchive* restores it, still switched off). **Delete system** is only
+  offered for a system that never exchanged a message - one created by
+  mistake or for a test; its keys and subscriptions go with it, its audit
+  entries stay. API: `POST /api/v1/systems/{code}/archive`, `.../unarchive`,
+  `DELETE /api/v1/systems/{code}` (`409` if it has messages; `deletable`
+  in each system says which).
 - **Adding a new topic / changing subscriptions**: *Setup › Topics* →
   *Add topic*; turn it on or off under *Topics this system receives* in a
   system's settings to change what that system receives. Both are no-deploy configuration

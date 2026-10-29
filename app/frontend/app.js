@@ -162,6 +162,12 @@ function isStalePuller(s) {
     return Date.now() - new Date(s.last_polled_at).getTime() > STALE_POLL_MINUTES * 60000;
 }
 
+// Archived systems are kept for history (names in threads, deliveries and
+// activity) but left out of lists, filters and the checklist (Decision 19).
+function currentSystems() {
+    return state.systems.filter((s) => !s.archived_at);
+}
+
 function hostOf(url) {
     try { return new URL(url).host; } catch { return url; }
 }
@@ -303,10 +309,10 @@ async function loadReference() {
     state.topics = topics.data ?? [];
     state.systemsByCode = new Map(state.systems.map((s) => [s.code, s]));
     state.topicsByCode = new Map(state.topics.map((t) => [t.code, t]));
-    fillSelect($("filter-conversations-system"), state.systems, "All systems");
+    fillSelect($("filter-conversations-system"), currentSystems(), "All systems");
     fillSelect($("filter-conversations-topic"), state.topics, "All topics");
-    fillSelect($("filter-deliveries-system"), state.systems, "All destinations");
-    fillSelect($("filter-activity-system"), state.systems, "All systems");
+    fillSelect($("filter-deliveries-system"), currentSystems(), "All destinations");
+    fillSelect($("filter-activity-system"), currentSystems(), "All systems");
 }
 
 function fillSelect(select, items, allLabel) {
@@ -552,7 +558,7 @@ async function renderSetupChecklist() {
             run: () => openTopicSheet(null),
         },
         {
-            done: state.systems.length >= 2,
+            done: currentSystems().length >= 2,
             title: "Add the systems that exchange tickets",
             text: "At least two, usually one per team's support application.",
             run: () => openSystemSheet(null),
@@ -1062,22 +1068,36 @@ $("btn-setup-add").addEventListener("click", () => {
     else openTopicSheet(null);
 });
 
+let showArchived = false;
+
+$("btn-toggle-archived").addEventListener("click", () => {
+    showArchived = !showArchived;
+    drawSystems();
+});
+
 function drawSystems() {
     const list = $("list-systems");
     clearEmpty(list);
-    if (state.systems.length === 0) {
+    const archivedCount = state.systems.length - currentSystems().length;
+    const toggle = $("btn-toggle-archived");
+    toggle.hidden = archivedCount === 0;
+    toggle.textContent = showArchived ? "Hide archived" : `Show archived (${archivedCount})`;
+    const shown = showArchived ? state.systems : currentSystems();
+    if (shown.length === 0) {
         list.innerHTML = "";
         setEmpty(list, {
             iconName: "i-setup",
-            title: "No systems yet",
-            text: "Add each team's support application, so the bridge can pass tickets between them.",
+            title: archivedCount ? "No systems in use" : "No systems yet",
+            text: archivedCount
+                ? "Every system is archived. Add one, or show the archived ones to bring one back."
+                : "Add each team's support application, so the bridge can pass tickets between them.",
             actionLabel: "Add system",
             actionId: "btn-empty-add-system",
         }, () => openSystemSheet(null));
         return;
     }
-    list.innerHTML = state.systems.map((s) => {
-        const pills = [
+    list.innerHTML = shown.map((s) => {
+        const pills = s.archived_at ? `<span class="pill">Archived</span>` : [
             s.active ? "" : `<span class="pill">Inactive</span>`,
             s.has_legacy_secret_ref ? `<span class="pill pill-red">Needs its secret</span>` : "",
             s.topics.length === 0 ? `<span class="pill pill-orange">No topics</span>` : `<span class="pill">${escapeHtml(plural(s.topics.length, "topic"))}</span>`,
@@ -1088,11 +1108,11 @@ function drawSystems() {
             s.has_secret ? `<span class="pill">${icon("i-lock")}Secret set</span>` : "",
         ].join("");
         return `
-            <button type="button" class="row has-leading" data-system="${escapeHtml(s.code)}">
+            <button type="button" class="row has-leading ${s.archived_at ? "is-archived" : ""}" data-system="${escapeHtml(s.code)}">
                 ${avatar(s.code, s.name)}
                 <span class="row-main">
                     <span class="row-title">${escapeHtml(s.name)}</span>
-                    <span class="row-subtitle">${escapeHtml(s.code)} – ${escapeHtml(s.delivery_mode === "pull"
+                    <span class="row-subtitle">${escapeHtml(s.code)} – ${escapeHtml(s.archived_at ? `archived ${formatRelative(s.archived_at)}` : s.delivery_mode === "pull"
                         ? (s.last_polled_at ? `last collected ${formatRelative(s.last_polled_at)}` : "never collected")
                         : hostOf(s.base_url))}</span>
                     <span class="row-meta">${pills}</span>
@@ -1120,7 +1140,7 @@ function drawTopics() {
         return;
     }
     list.innerHTML = state.topics.map((t) => {
-        const subscribers = state.systems.filter((s) => s.topics.includes(t.code)).length;
+        const subscribers = currentSystems().filter((s) => s.topics.includes(t.code)).length;
         return `
             <button type="button" class="row has-leading" data-topic="${escapeHtml(t.code)}">
                 ${avatar(t.code, t.name)}
@@ -1218,6 +1238,7 @@ function openSystemSheet(system) {
     $("new-api-key-description").value = "";
     $("list-api-keys").innerHTML = "";
     if (system) loadApiKeys(system.code);
+    renderRetireSection(system);
 
     openSheet("sheet-system");
     systemForm.name.focus();
@@ -1279,6 +1300,61 @@ systemForm.addEventListener("submit", async (e) => {
     await loadReference();
     await currentRender?.();
 });
+
+// ---- Archive / unarchive / delete (bottom of the system sheet) -------------------
+function renderRetireSection(system) {
+    $("system-retire-section").hidden = !system;
+    if (!system) return;
+    const archived = !!system.archived_at;
+    $("btn-unarchive-system").hidden = !archived;
+    $("btn-archive-system").hidden = archived;
+    $("btn-delete-system").hidden = !system.deletable;
+    $("system-retire-footer").textContent = [
+        archived
+            ? `Archived on ${formatDateTime(system.archived_at)}. Unarchiving brings it back switched off, so nothing reaches it until you turn it on.`
+            : "Archiving hides this system and stops its messages both ways, keeping its history. You can unarchive it later.",
+        system.deletable
+            ? "It never exchanged a message, so you can also delete it for good."
+            : "It can't be deleted because it has exchanged messages.",
+    ].join(" ");
+}
+
+async function retireSystem(action) {
+    const system = systemBeingEdited;
+    const copy = {
+        archive: {
+            title: `Archive ${system.name}?`,
+            message: "It's switched off and hidden. Its keys stop working and it gets no more messages. Its history stays.",
+            confirmLabel: "Archive",
+            done: "System archived",
+        },
+        unarchive: { done: "System unarchived" },
+        delete: {
+            title: `Delete ${system.name}?`,
+            message: "Its keys and topic subscriptions are deleted too. This can't be undone.",
+            confirmLabel: "Delete",
+            done: "System deleted",
+        },
+    }[action];
+    if (copy.title && !(await confirmAlert({ ...copy, destructive: true }))) return;
+
+    const code = encodeURIComponent(system.code);
+    const result = action === "delete"
+        ? await api(`systems/${code}`, { method: "DELETE" })
+        : await api(`systems/${code}/${action}`, { method: "POST" });
+    if (!result.ok) {
+        toast(errorText(result, `Couldn't ${action} the system`), "error");
+        return;
+    }
+    $("sheet-system").close();
+    toast(copy.done);
+    await loadReference();
+    await currentRender?.();
+}
+
+$("btn-archive-system").addEventListener("click", () => retireSystem("archive"));
+$("btn-unarchive-system").addEventListener("click", () => retireSystem("unarchive"));
+$("btn-delete-system").addEventListener("click", () => retireSystem("delete"));
 
 // ---- Inbound API keys (inside the system sheet) ---------------------------------
 async function loadApiKeys(code) {
@@ -1373,7 +1449,7 @@ function openTopicSheet(topic) {
         topicForm.active.checked = topic.active;
     }
 
-    const subscribers = topic ? state.systems.filter((s) => s.topics.includes(topic.code)) : [];
+    const subscribers = topic ? currentSystems().filter((s) => s.topics.includes(topic.code)) : [];
     $("topic-subscribers-section").hidden = !topic;
     const list = $("list-topic-subscribers");
     list.innerHTML = subscribers.length
@@ -1445,6 +1521,9 @@ function describeActivity(r) {
         delivery_failure: { tile: "tile-red", icon: "i-alert", title: `Couldn't deliver to ${sys}`, sub: d.error ?? "" },
         delivery_retry_requested: { tile: "tile-orange", icon: "i-retry", title: `Retry requested for ${sys}`, sub: d.previous_error ?? "" },
         system_config_created: { tile: "tile-gray", icon: "i-gear", title: `${sys} added`, sub: "" },
+        system_archived: { tile: "tile-gray", icon: "i-setup", title: `${sys} archived`, sub: "" },
+        system_unarchived: { tile: "tile-gray", icon: "i-setup", title: `${sys} unarchived`, sub: "" },
+        system_deleted: { tile: "tile-red", icon: "i-setup", title: `${d.name ?? sys} deleted`, sub: r.system_code ?? "" },
         system_config_updated: { tile: "tile-gray", icon: "i-gear", title: `${sys} settings changed`, sub: (d.changed_fields ?? []).map((f) => f.replaceAll("_", " ")).join(", ") },
         topic_config_created: { tile: "tile-gray", icon: "i-tag", title: `Topic ${topicName(d.code)} added`, sub: "" },
         topic_config_updated: { tile: "tile-gray", icon: "i-tag", title: `Topic ${topicName(d.code)} changed`, sub: (d.changed_fields ?? []).join(", ") },
