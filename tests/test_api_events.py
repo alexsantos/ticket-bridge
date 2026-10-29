@@ -120,3 +120,28 @@ async def test_invalid_or_missing_api_key(client):
 async def test_status_outside_the_canonical_vocabulary_is_rejected(client):
     resp = await send_event(client, SYSTEM_A_KEY, external_ref="A-1", status="Open", topic_code="INFRA")
     assert resp.status_code == 422
+
+
+async def test_overall_status_follows_the_latest_event(admin, app_env):
+    created = await _new_ticket(admin)
+    cid = created["conversation_id"]
+    before = (await admin.get(f"/api/v1/conversations/{cid}")).json()
+    assert before["overall_status"] == "new"
+
+    await send_event(admin, SYSTEM_B_KEY, conversation_id=cid, external_ref="B-9", status="resolved")
+    after = (await admin.get(f"/api/v1/conversations/{cid}")).json()
+    assert after["overall_status"] == "resolved"
+    assert after["updated_at"] > before["updated_at"]  # lists sort by latest activity
+
+    # Whichever system sent it - the latest event wins.
+    await send_event(admin, SYSTEM_A_KEY, conversation_id=cid, external_ref="A-1", status="closed")
+    assert (await admin.get(f"/api/v1/conversations/{cid}")).json()["overall_status"] == "closed"
+
+
+async def test_rejected_update_leaves_the_status_alone(admin):
+    created = await _new_ticket(admin)
+    cid = created["conversation_id"]
+    resp = await send_event(admin, SYSTEM_B_KEY, conversation_id=cid, external_ref="B-9",
+                            status="resolved", topic_code="SPM")
+    assert resp.status_code == 409
+    assert (await admin.get(f"/api/v1/conversations/{cid}")).json()["overall_status"] == "new"

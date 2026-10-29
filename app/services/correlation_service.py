@@ -47,7 +47,9 @@ async def find_or_create_conversation(
       - If `conversation_id` is provided, the conversation must already
         exist. `topic_code`, if also provided, must match the conversation's
         stored value (topics are immutable after creation) - a mismatch
-        raises TopicMismatch.
+        raises TopicMismatch. The conversation's `overall_status` becomes
+        this event's `status`: it always follows the latest event, from
+        whichever system sent it.
       - If not provided, a new conversation is created with the source
         system as its first participant. `topic_code` is required in this
         case (enforced by the caller before validation of subscription, see
@@ -90,6 +92,9 @@ async def find_or_create_conversation(
             external_ref=external_ref,
             local_status=status,
         )
+
+    if not created:
+        await update_conversation_overall_status(conn, conversation_id=conversation_id, overall_status=status)
 
     if created:
         await record_audit(
@@ -191,6 +196,7 @@ async def is_system_subscribed(conn: AsyncConnection, *, system_code: str, topic
 async def update_conversation_overall_status(
     conn: AsyncConnection, *, conversation_id: UUID, overall_status: str
 ) -> None:
+    """Sets the conversation's status (and, via its trigger, updated_at - so lists sort by latest activity)."""
     async with conn.cursor() as cur:
         await cur.execute(
             "UPDATE conversations SET overall_status = %(status)s WHERE conversation_id = %(cid)s",

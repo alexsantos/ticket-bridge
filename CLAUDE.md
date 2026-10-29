@@ -671,13 +671,11 @@ pagination on the conversations list beyond the API's 200 most recent
 (client-side search over those); dark mode follows the OS only, with no
 in-app switch.
 
-**Status shown for a conversation**: the latest `local_status` any
-participant reported, not `conversations.overall_status` - nothing
-updates that column after creation
-(`correlation_service.update_conversation_overall_status` is never
-called), so it would read "New" forever. Fixing the column itself is a
-backend decision left open (see "What this skeleton assumes and leaves
-undecided").
+**Status shown for a conversation**: `conversations.overall_status`,
+which follows the latest event since 0.14.0 (see "What this skeleton
+assumes" below). Before that it was never updated after creation, and
+the frontend briefly worked around it with the latest participant
+status.
 
 **Update - the simulator too**: `simulator/sim/static` got the same
 treatment, modelled on Messages/Mail since the simulator *is* a
@@ -695,12 +693,15 @@ are in `docs/screenshots/`, used by README.md.
   conversation's `overall_status` is informational, not a normative source
   of truth. If an explicit per-direction field owner is needed (as
   initially discussed), the place to extend is `correlation_service.py`.
-- **`conversations.overall_status`** is written once, at creation, and
-  never updated (`update_conversation_overall_status` and
-  `get_participant_status` in `correlation_service.py` exist but nothing
-  calls them). The frontend shows the latest participant status instead
-  (Decision 17). Whether the column should follow the latest event, be
-  derived, or be dropped is undecided.
+- **`conversations.overall_status` follows the latest event** (0.14.0):
+  every event on an existing conversation sets it to that event's
+  `status`, whichever system sent it - "last writer wins", with no notion
+  of one system's status outranking another's (that's the field-conflict
+  question above). Before 0.14.0 it was written once at creation and
+  never updated; migration `009_overall_status_follows_latest_event.sql`
+  backfills existing conversations from their latest `event_received`.
+  Updating it also bumps the conversation's `updated_at`, so lists sort
+  by latest activity rather than by creation.
 - **Failure alerts** (e.g. Telegram, as used in other projects by the
   author): not implemented in this skeleton; the natural place is inside
   `outbox_service.mark_failed`, when an entry reaches `max_attempts`.

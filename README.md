@@ -297,7 +297,8 @@ ticket-bridge/
 │   ├── 005_admin_authentication.sql        # users/sessions tables + seeded default admin
 │   ├── 006_stored_outbound_secrets.sql     # encrypted outbound secret column on systems
 │   ├── 007_retire_secret_ref.sql           # drops secret_ref where a stored secret replaces it
-│   └── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
+│   ├── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
+│   └── 009_overall_status_follows_latest_event.sql # backfills each conversation's status from its latest event
 ├── tests/
 │   ├── conftest.py              # real Postgres per test (Docker or TEST_DATABASE_URL), app client fixtures
 │   ├── helpers.py               # seeded keys/credentials, send_event(), query()
@@ -358,6 +359,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/005_admin_authenticatio
 psql "postgresql://localhost/ticketbridge" -f migrations/006_stored_outbound_secrets.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/007_retire_secret_ref.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/008_per_system_tls_verification.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/009_overall_status_follows_latest_event.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -730,6 +732,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/007_retire_secret_ref.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/008_per_system_tls_verification.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/009_overall_status_follows_latest_event.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
