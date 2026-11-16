@@ -20,6 +20,9 @@ class InboundTicketEvent(BaseModel):
 
     event: Literal["ticket.created", "ticket.updated"]
     conversation_id: str
+    # Readable reference (e.g. PATIENT_ADMIN-1042), for people only. Absent on
+    # messages the bridge queued before it existed (0.17.0).
+    conversation_ref: str | None = None
     status: Status
     source_system: str
     source_ref: str

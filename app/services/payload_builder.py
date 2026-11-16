@@ -18,6 +18,7 @@ def build_outbound_payload(
     *,
     is_known_participant: bool,
     conversation_id: UUID,
+    conversation_ref: str,
     status: CanonicalStatus,
     source_system: str,
     source_ref: str,
@@ -43,6 +44,7 @@ def build_outbound_payload(
     return OutboundTicketEvent(
         event=event,
         conversation_id=conversation_id,
+        conversation_ref=conversation_ref,
         status=status,
         source_system=source_system,
         source_ref=source_ref,

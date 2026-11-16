@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     ref             TEXT UNIQUE,
     conversation_id TEXT UNIQUE,
+    conversation_ref TEXT,
     subject         TEXT,
     topic_code      TEXT,
     status          TEXT NOT NULL,
@@ -98,6 +99,10 @@ def connect() -> Iterator[sqlite3.Connection]:
 def init() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        # Databases created before the bridge had readable refs lack the column.
+        columns = {r["name"] for r in conn.execute("PRAGMA table_info(tickets)")}
+        if "conversation_ref" not in columns:
+            conn.execute("ALTER TABLE tickets ADD COLUMN conversation_ref TEXT")
 
 
 # --- settings ---------------------------------------------------------------
@@ -158,15 +163,16 @@ def find_ticket(*, ref: str | None = None, conversation_id: str | None = None) -
 
 def create_ticket(
     *, ref_prefix: str, subject: str | None, topic_code: str | None, status: str,
-    origin: str, conversation_id: str | None = None, counterpart: str | None = None,
+    origin: str, conversation_id: str | None = None, conversation_ref: str | None = None,
+    counterpart: str | None = None,
 ) -> dict[str, Any]:
     """Inserts a ticket and assigns its ref from the row id (e.g. SIM-0001)."""
     ts = now()
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO tickets (subject, topic_code, status, origin, conversation_id, "
-            "counterpart, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (subject, topic_code, status, origin, conversation_id, counterpart, ts, ts),
+            "conversation_ref, counterpart, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (subject, topic_code, status, origin, conversation_id, conversation_ref, counterpart, ts, ts),
         )
         ref = f"{ref_prefix}-{cur.lastrowid:04d}"
         conn.execute("UPDATE tickets SET ref = ? WHERE id = ?", (ref, cur.lastrowid))
@@ -180,7 +186,7 @@ def delete_ticket(ticket_id: int) -> None:
 
 
 def update_ticket(ticket_id: int, **fields: Any) -> None:
-    allowed = {"status", "conversation_id", "linked", "counterpart", "subject"}
+    allowed = {"status", "conversation_id", "conversation_ref", "linked", "counterpart", "subject"}
     fields = {k: v for k, v in fields.items() if k in allowed}
     fields["updated_at"] = now()
     assignments = ", ".join(f"{k} = ?" for k in fields)

@@ -108,6 +108,7 @@ async def test_deliveries_list_filters_and_pages(admin):
 
     by_conversation = (await admin.get(f"/api/v1/deliveries?conversation_id={first['conversation_id']}")).json()
     assert [d["conversation_subject"] for d in by_conversation["items"]] == ["One"]
+    assert by_conversation["items"][0]["conversation_ref"] == first["conversation_ref"]
     assert (await admin.get("/api/v1/deliveries?system_code=system_a")).json()["items"] == []
     assert len((await admin.get("/api/v1/deliveries?status=pending")).json()["items"]) == 2
     assert (await admin.get("/api/v1/deliveries?status=bogus")).status_code == 422

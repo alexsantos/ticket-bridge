@@ -120,7 +120,9 @@ curl -X POST http://localhost:8080/api/v1/events \
 
 `system_a` is itself subscribed to `PATIENT_ADMIN` (required to create a
 ticket there - see "Error scenarios" below), so this succeeds and returns
-a new `conversation_id` - the shared thread for this case. `metadata.note`
+a new `conversation_id` - the shared thread for this case - plus its
+readable `conversation_ref` (`PATIENT_ADMIN-1` on a fresh database), the
+one to show people. `metadata.note`
 is the free-text comment a person at the front desk typed while opening
 the case - just another key in the same generic `metadata` object.
 
@@ -133,6 +135,7 @@ reference yet:
 {
   "event": "ticket.created",
   "conversation_id": "<conversation_id>",
+  "conversation_ref": "PATIENT_ADMIN-1",
   "status": "new",
   "source_system": "system_a",
   "source_ref": "CASE-4471",
@@ -174,6 +177,7 @@ note included:
 {
   "event": "ticket.updated",
   "conversation_id": "<conversation_id>",
+  "conversation_ref": "PATIENT_ADMIN-1",
   "status": "in_progress",
   "source_system": "system_b",
   "source_ref": "INSVER-8842",
@@ -219,6 +223,7 @@ was about:
 {
   "event": "ticket.updated",
   "conversation_id": "<conversation_id>",
+  "conversation_ref": "PATIENT_ADMIN-1",
   "status": "resolved",
   "source_system": "system_b",
   "source_ref": "INSVER-8842",
@@ -253,6 +258,7 @@ both sides now agree the case is done:
 {
   "event": "ticket.updated",
   "conversation_id": "<conversation_id>",
+  "conversation_ref": "PATIENT_ADMIN-1",
   "status": "closed",
   "source_system": "system_a",
   "source_ref": "CASE-4471",

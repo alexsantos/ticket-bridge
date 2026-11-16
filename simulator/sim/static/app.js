@@ -178,7 +178,7 @@ function drawTickets() {
     const list = $("ticket-list");
     const query = $("search").value.trim().toLowerCase();
     const items = tickets.filter((t) => (!originFilter || t.origin === originFilter)
-        && (!query || (t.subject ?? "").toLowerCase().includes(query) || (t.ref ?? "").toLowerCase().includes(query)
+        && (!query || (t.subject ?? "").toLowerCase().includes(query) || (t.ref ?? "").toLowerCase().includes(query) || (t.conversation_ref ?? "").toLowerCase().includes(query)
             || (t.counterpart ?? "").toLowerCase().includes(query)));
 
     if (items.length === 0) {
@@ -255,7 +255,7 @@ async function loadConversation({ scrollToEnd = false, setStatus = false } = {})
 
     $("conv-title").textContent = ticket.subject || "No subject";
     $("conv-meta").textContent = [
-        ticket.ref,
+        ticket.conversation_ref ? `${ticket.ref} (${ticket.conversation_ref} in the bridge)` : ticket.ref,
         ticket.origin === "sent" ? "opened here" : `from ${ticket.counterpart ?? "another system"}`,
         ticket.topic_code,
     ].filter(Boolean).join(", ");

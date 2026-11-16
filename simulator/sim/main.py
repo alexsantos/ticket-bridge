@@ -101,10 +101,14 @@ def _receive(settings: dict[str, str], event: InboundTicketEvent) -> dict[str, A
             status=event.status,
             origin="received",
             conversation_id=event.conversation_id,
+            conversation_ref=event.conversation_ref,
             counterpart=event.source_system,
         )
     else:
-        store.update_ticket(ticket["id"], status=event.status, counterpart=event.source_system)
+        changes = {"status": event.status, "counterpart": event.source_system}
+        if event.conversation_ref:
+            changes["conversation_ref"] = event.conversation_ref
+        store.update_ticket(ticket["id"], **changes)
 
     store.add_message(
         ticket["id"], direction="in", event=event.event, status=event.status,
@@ -205,7 +209,10 @@ def create_ticket(payload: NewTicket) -> dict[str, Any]:
         store.delete_ticket(ticket["id"])  # the bridge never saw it - don't keep a ghost
         raise HTTPException(status_code=502, detail=exc.detail) from exc
 
-    store.update_ticket(ticket["id"], conversation_id=result["conversation_id"], linked=1)
+    store.update_ticket(
+        ticket["id"], conversation_id=result["conversation_id"],
+        conversation_ref=result.get("conversation_ref"), linked=1,
+    )
     store.add_message(ticket["id"], direction="out", status=payload.status,
                       system=settings["system_code"], metadata=metadata)
     return get_ticket(ticket["id"])

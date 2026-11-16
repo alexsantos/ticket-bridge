@@ -97,6 +97,7 @@ identical for every system, always:
 {
   "event": "ticket.created",
   "conversation_id": "8a1ca7f4-0c8a-4e4d-843f-05c0ab201f07",
+  "conversation_ref": "PATIENT_ADMIN-1042",
   "status": "new",
   "source_system": "system_a",
   "source_ref": "CASE-4471",
@@ -110,6 +111,15 @@ identical for every system, always:
   conversation (you have no ticket of your own yet, so `external_ref` is
   `null`); `"ticket.updated"` every time after (referencing the ticket ref
   you yourself reported back the first time).
+- `conversation_id` / `conversation_ref`: the conversation's ID, and a
+  readable reference for it - `<topic_code>-<number>`, e.g.
+  `PATIENT_ADMIN-1042`. Show the ref to people (in your ticket, in emails,
+  on the phone) and use it to find the conversation in the admin panel.
+  Keep `conversation_id` for calling the bridge: it's the only identifier
+  `POST /api/v1/events` accepts. Neither ever changes. The number comes
+  from one counter for the whole bridge, so a topic's numbers have gaps.
+  Messages queued before 0.17.0 (e.g. an old failed delivery retried
+  later) don't have `conversation_ref`, so don't require it.
 - `source_system` / `source_ref`: which system and ticket ID originated
   this event - useful for cross-referencing even before you've linked
   your own ticket.
@@ -335,7 +345,8 @@ ticket-bridge/
 │   ├── 008_per_system_tls_verification.sql # per-system verify_tls flag (self-signed destinations)
 │   ├── 009_overall_status_follows_latest_event.sql # backfills each conversation's status from its latest event
 │   ├── 010_pull_delivery_mode.sql          # systems that collect their messages instead of a webhook
-│   └── 011_archive_and_delete_systems.sql  # archived_at; audit_log no longer blocks deleting a system
+│   ├── 011_archive_and_delete_systems.sql  # archived_at; audit_log no longer blocks deleting a system
+│   └── 012_conversation_ref.sql            # readable conversation refs (PATIENT_ADMIN-1042)
 ├── tests/
 │   ├── conftest.py              # real Postgres per test (Docker or TEST_DATABASE_URL), app client fixtures
 │   ├── helpers.py               # seeded keys/credentials, send_event(), query()
@@ -399,6 +410,7 @@ psql "postgresql://localhost/ticketbridge" -f migrations/008_per_system_tls_veri
 psql "postgresql://localhost/ticketbridge" -f migrations/009_overall_status_follows_latest_event.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/010_pull_delivery_mode.sql
 psql "postgresql://localhost/ticketbridge" -f migrations/011_archive_and_delete_systems.sql
+psql "postgresql://localhost/ticketbridge" -f migrations/012_conversation_ref.sql
 
 # 5. Configure environment variables
 cp .env.example .env
@@ -777,6 +789,8 @@ psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/010_pull_delivery_mode.sql
 psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
     -f migrations/011_archive_and_delete_systems.sql
+psql "postgresql://ticketbridge:PASSWORD@localhost:5432/ticketbridge" \
+    -f migrations/012_conversation_ref.sql
 # (002_seed_example.sql is for development only - do not run in production.
 #  005_admin_authentication.sql, unlike 002, must run here too - it's the
 #  only way an admin account exists at all. Change its seeded password
@@ -1013,7 +1027,9 @@ defense-in-depth on top of the above, rather than the only mechanism.
   as a thread: each message a system sent (status, its own ticket ref,
   `metadata`), with a receipt per destination underneath - delivered,
   waiting, or failed with an inline *Retry*. Select a receipt for the
-  exact payload.
+  exact payload. Search by subject, ticket ref or conversation ref
+  (`PATIENT_ADMIN-1042`); `#/conversations/PATIENT_ADMIN-1042` opens it
+  directly, as does `GET /api/v1/conversations/PATIENT_ADMIN-1042`.
 - **Adding a new system (e.g. a 3rd team)**: *Setup › Systems* → *Add
   system*. Requires no code deployment. Until every system has a topic
   and a key, the Overview screen lists what's missing.

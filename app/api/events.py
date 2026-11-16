@@ -47,7 +47,7 @@ async def receive_event(
 
             # 1. Correlation: create or locate the conversation and update the source participant.
             try:
-                conversation_id, created, topic_code, conversation_subject = (
+                conversation_id, created, topic_code, conversation_subject, conversation_ref = (
                     await correlation_service.find_or_create_conversation(
                         conn,
                         conversation_id=event.conversation_id,
@@ -92,6 +92,7 @@ async def receive_event(
                 payload = payload_builder.build_outbound_payload(
                     is_known_participant=destination_row["is_known_participant"],
                     conversation_id=conversation_id,
+                    conversation_ref=conversation_ref,
                     status=event.status,
                     source_system=source,
                     source_ref=event.external_ref,
@@ -118,7 +119,9 @@ async def receive_event(
                 detail={"topic_code": topic_code, "outbox_ids": outbox_ids, "destinations": fanout_detail},
             )
 
-    return IncomingEventResponse(conversation_id=conversation_id, created_outbox_ids=outbox_ids)
+    return IncomingEventResponse(
+        conversation_id=conversation_id, conversation_ref=conversation_ref, created_outbox_ids=outbox_ids
+    )
 
 
 async def _validate_new_conversation_topic(conn, *, source: str, topic_code: str | None) -> None:

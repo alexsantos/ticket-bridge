@@ -152,7 +152,7 @@ async def list_entries(
     async with conn.cursor() as cur:
         await cur.execute(
             f"""
-            SELECT o.id, o.conversation_id, c.subject AS conversation_subject,
+            SELECT o.id, o.conversation_id, c.conversation_ref, c.subject AS conversation_subject,
                    o.destination, o.source, o.payload->>'event' AS event, o.payload,
                    o.status, o.attempts, o.max_attempts, o.last_error,
                    o.created_at, o.processed_at

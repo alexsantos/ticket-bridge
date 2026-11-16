@@ -35,6 +35,10 @@ async def test_new_conversation_fans_out_to_subscribed_systems(client, app_env):
     assert payload["conversation_id"] == created["conversation_id"]
     assert len(created["created_outbox_ids"]) == 1
 
+    stored = await query(app_env, "SELECT conversation_number, conversation_ref FROM conversations")
+    assert stored[0]["conversation_ref"] == f"INFRA-{stored[0]['conversation_number']}"
+    assert created["conversation_ref"] == payload["conversation_ref"] == stored[0]["conversation_ref"]
+
     audit = await query(app_env, "SELECT event_type FROM audit_log ORDER BY id")
     assert [a["event_type"] for a in audit] == ["conversation_created", "event_received", "fanout_scheduled"]
 
@@ -47,8 +51,11 @@ async def test_reply_updates_the_known_participant(client, app_env):
     )
     assert reply.status_code == 200
 
+    assert reply.json()["conversation_ref"] == created["conversation_ref"]
+
     rows = await query(app_env, "SELECT payload FROM outbox WHERE destination = 'system_a'")
     assert rows[0]["payload"]["event"] == "ticket.updated"
+    assert rows[0]["payload"]["conversation_ref"] == created["conversation_ref"]
     assert rows[0]["payload"]["external_ref"] == "A-1"
     assert rows[0]["payload"]["status"] == "in_progress"
 
@@ -145,3 +152,13 @@ async def test_rejected_update_leaves_the_status_alone(admin):
                             status="resolved", topic_code="SPM")
     assert resp.status_code == 409
     assert (await admin.get(f"/api/v1/conversations/{cid}")).json()["overall_status"] == "new"
+
+
+async def test_conversation_refs_are_numbered_across_topics(client):
+    first = await _new_ticket(client)
+    second = await _new_ticket(client, external_ref="A-2", topic_code="PATIENT_ADMIN")
+
+    topic_1, number_1 = first["conversation_ref"].rsplit("-", 1)
+    topic_2, number_2 = second["conversation_ref"].rsplit("-", 1)
+    assert (topic_1, topic_2) == ("INFRA", "PATIENT_ADMIN")
+    assert int(number_2) == int(number_1) + 1  # one sequence for the whole bridge

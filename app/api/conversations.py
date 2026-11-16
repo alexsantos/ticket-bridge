@@ -5,6 +5,9 @@ Read-only query endpoints for conversations and their participants - used
 by the frontend's "Conversations" tab (an operational view of what's
 correlated with what, equivalent to browsing tickets in the old OSTicket).
 
+A single conversation can be looked up by its UUID or by its readable
+reference (e.g. 'PATIENT_ADMIN-1042', see CLAUDE.md Decision 20).
+
 Security note: every route here requires an authenticated admin session
 (see require_login in app/security.py).
 """
@@ -45,8 +48,8 @@ async def list_conversations(
 
             await cur.execute(
                 f"""
-                {select_prefix} c.conversation_id, c.subject, c.topic_code, c.overall_status,
-                       c.created_at, c.updated_at
+                {select_prefix} c.conversation_id, c.conversation_ref, c.subject, c.topic_code,
+                       c.overall_status, c.created_at, c.updated_at
                 FROM conversations c
                 {join_clause}
                 {where_clause}
@@ -64,24 +67,30 @@ async def list_conversations(
     return result
 
 
-@router.get("/{conversation_id}", response_model=ConversationOut)
-async def get_conversation(conversation_id: UUID) -> ConversationOut:
+@router.get("/{conversation}", response_model=ConversationOut)
+async def get_conversation(conversation: str) -> ConversationOut:
+    """`conversation` is either the UUID or the readable reference (e.g. PATIENT_ADMIN-1042)."""
+    try:
+        column, value = "conversation_id", UUID(conversation)
+    except ValueError:
+        column, value = "conversation_ref", conversation
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
-                SELECT conversation_id, subject, topic_code, overall_status, created_at, updated_at
-                FROM conversations WHERE conversation_id = %(id)s
+                f"""
+                SELECT conversation_id, conversation_ref, subject, topic_code, overall_status,
+                       created_at, updated_at
+                FROM conversations WHERE {column} = %(value)s
                 """,
-                {"id": conversation_id},
+                {"value": value},
             )
-            conversation = await cur.fetchone()
+            row = await cur.fetchone()
 
-        if conversation is None:
+        if row is None:
             raise HTTPException(status_code=404, detail="Conversation not found.")
 
-        participants = await _fetch_participants(conn, conversation_id)
-    return ConversationOut(**conversation, participants=participants)
+        participants = await _fetch_participants(conn, row["conversation_id"])
+    return ConversationOut(**row, participants=participants)
 
 
 async def _fetch_participants(conn, conversation_id: UUID) -> list[ParticipantOut]:

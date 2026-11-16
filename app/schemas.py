@@ -90,6 +90,10 @@ class IncomingEvent(BaseModel):
 
 class IncomingEventResponse(BaseModel):
     conversation_id: UUID
+    conversation_ref: str = Field(
+        description="Readable reference for people (e.g. 'PATIENT_ADMIN-1042'). "
+                    "Use conversation_id, not this, on later calls.",
+    )
     created_outbox_ids: list[int]
 
 
@@ -105,6 +109,11 @@ class OutboundTicketEvent(BaseModel):
     """
     event: Literal["ticket.created", "ticket.updated"]
     conversation_id: UUID
+    conversation_ref: str = Field(
+        description="Readable reference for people, '<topic_code>-<number>' (e.g. "
+                    "'PATIENT_ADMIN-1042'). Never changes. Identify the conversation by "
+                    "conversation_id when calling the bridge.",
+    )
     status: CanonicalStatus
     source_system: str
     source_ref: str
@@ -320,6 +329,7 @@ class ParticipantOut(BaseModel):
 
 class ConversationOut(BaseModel):
     conversation_id: UUID
+    conversation_ref: str
     subject: str | None
     topic_code: str
     overall_status: CanonicalStatus
@@ -353,6 +363,7 @@ OutboxStatus = Literal["pending", "sent", "failed"]
 class OutboxEntryOut(BaseModel):
     id: int
     conversation_id: UUID
+    conversation_ref: str
     conversation_subject: str | None
     destination: str
     source: str

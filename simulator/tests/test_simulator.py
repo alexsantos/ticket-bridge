@@ -8,11 +8,13 @@ bridge's dispatcher calls it.
 
     cd simulator && uv run pytest -v
 """
+import sqlite3
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from sim import bridge
+from sim import bridge, store
 from sim.main import app
 
 CONV = "11111111-2222-3333-4444-555555555555"
@@ -31,7 +33,9 @@ class FakeBridge:
             return httpx.Response(self.fail_with, json={"detail": "nope"}, request=request)
         self.events.append(json)
         return httpx.Response(
-            200, json={"conversation_id": json.get("conversation_id") or CONV, "created_outbox_ids": [1]},
+            200,
+            json={"conversation_id": json.get("conversation_id") or CONV, "conversation_ref": "PATIENT_ADMIN-7",
+                  "created_outbox_ids": [1]},
             request=request,
         )
 
@@ -54,7 +58,7 @@ def client(tmp_path, monkeypatch):
 
 def delivery(event="ticket.created", status="new", external_ref=None, metadata=None):
     return {
-        "event": event, "conversation_id": CONV, "status": status,
+        "event": event, "conversation_id": CONV, "conversation_ref": "PATIENT_ADMIN-7", "status": status,
         "source_system": "system_a", "source_ref": "CASE-1",
         "external_ref": external_ref, "conversation_subject": "Patient #1 - no insurance",
         "metadata": metadata or {},
@@ -74,6 +78,7 @@ def test_received_ticket_is_matched_by_conversation_until_linked(client, fake_br
     tickets = client.get("/api/tickets").json()
     assert len(tickets) == 1
     assert tickets[0]["origin"] == "received" and tickets[0]["linked"] is False
+    assert tickets[0]["conversation_ref"] == "PATIENT_ADMIN-7"
     detail = client.get(f"/api/tickets/{tickets[0]['id']}").json()
     assert [m["direction"] for m in detail["messages"]] == ["in", "in"]
     assert detail["messages"][0]["metadata"] == {"note": "please check"}
@@ -111,6 +116,7 @@ def test_new_ticket_is_sent_with_topic_and_subject(client, fake_bridge):
         "topic_code": "PATIENT_ADMIN", "metadata": {"note": "hi"},
     }]
     assert ticket["conversation_id"] == CONV and ticket["linked"] is True
+    assert ticket["conversation_ref"] == "PATIENT_ADMIN-7"
     assert ticket["ref"].startswith("SIM-")
 
 
@@ -147,3 +153,21 @@ def test_config_never_returns_secrets(client):
     assert kept["api_key_set"] and kept["inbound_secret_set"]
     cleared = client.put("/api/config", json={**base, "clear_inbound_secret": True}).json()
     assert cleared["inbound_secret_set"] is False and cleared["api_key_set"]
+
+
+def test_message_without_conversation_ref_keeps_the_known_one(client, fake_bridge):
+    # Messages queued before the bridge had refs (and retried as-is) carry none.
+    client.post("/webhook", json=delivery())
+    old = {k: v for k, v in delivery(status="in_progress").items() if k != "conversation_ref"}
+    assert client.post("/webhook", json=old).status_code == 200
+    assert client.get("/api/tickets").json()[0]["conversation_ref"] == "PATIENT_ADMIN-7"
+
+
+def test_init_adds_conversation_ref_to_an_older_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("SIM_DATA_DIR", str(tmp_path))
+    with sqlite3.connect(tmp_path / "simulator.db") as conn:
+        conn.execute("CREATE TABLE tickets (id INTEGER PRIMARY KEY, ref TEXT)")
+    store.init()
+    with sqlite3.connect(tmp_path / "simulator.db") as conn:
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(tickets)")}
+    assert "conversation_ref" in columns

@@ -361,7 +361,7 @@ async function router() {
 
     if (section === "conversations" && sub) {
         showView("view-conversation", "conversations");
-        currentRender = () => renderConversation(sub);
+        currentRender = () => renderConversation(decodeURIComponent(sub));
     } else if (section === "conversations") {
         showView("view-conversations", "conversations");
         currentRender = renderConversations;
@@ -608,11 +608,11 @@ let conversationsCache = [];
 function conversationRow(c) {
     const refs = c.participants.map((p) => `${systemName(p.system_code)} (${p.external_ref})`).join(", ");
     return `
-        <a class="row has-leading" href="#/conversations/${encodeURIComponent(c.conversation_id)}">
+        <a class="row has-leading" href="#/conversations/${encodeURIComponent(c.conversation_ref)}">
             ${avatar(c.topic_code, topicName(c.topic_code))}
             <span class="row-main">
                 <span class="row-title">${escapeHtml(c.subject || "Untitled conversation")}</span>
-                <span class="row-subtitle">${escapeHtml(topicName(c.topic_code))}${refs ? ` – ${escapeHtml(refs)}` : ""}</span>
+                <span class="row-subtitle">${escapeHtml(c.conversation_ref)} – ${escapeHtml(topicName(c.topic_code))}${refs ? ` – ${escapeHtml(refs)}` : ""}</span>
             </span>
             <span class="row-trailing">
                 ${statusPill(c.overall_status)}
@@ -641,6 +641,7 @@ function drawConversations() {
     const items = conversationsCache.filter((c) => !query
         || (c.subject ?? "").toLowerCase().includes(query)
         || c.conversation_id.startsWith(query)
+        || c.conversation_ref.toLowerCase().includes(query)
         || c.participants.some((p) => p.external_ref.toLowerCase().includes(query)));
 
     if (items.length === 0) {
@@ -680,14 +681,11 @@ $("filter-conversations-topic").addEventListener("change", renderConversations);
 // ---------------------------------------------------------------------------
 // One conversation, as a thread
 // ---------------------------------------------------------------------------
-async function renderConversation(id) {
+async function renderConversation(idOrRef) {
     const container = $("conversation-detail");
-    $("conversation-activity-link").href = `#/activity?conversation=${encodeURIComponent(id)}`;
-    const [conversation, audit, deliveries] = await Promise.all([
-        api(`conversations/${encodeURIComponent(id)}`),
-        api(`audit?conversation_id=${encodeURIComponent(id)}&limit=500`),
-        api(`deliveries?conversation_id=${encodeURIComponent(id)}&limit=500`),
-    ]);
+    // The route holds either the UUID or the readable ref (PATIENT_ADMIN-1042);
+    // the audit log and deliveries are filtered by the UUID, so resolve it first.
+    const conversation = await api(`conversations/${encodeURIComponent(idOrRef)}`);
     if (!conversation.ok) {
         container.innerHTML = emptyState({
             iconName: "i-conversations",
@@ -697,6 +695,12 @@ async function renderConversation(id) {
         return;
     }
     const c = conversation.data;
+    const id = c.conversation_id;
+    $("conversation-activity-link").href = `#/activity?conversation=${encodeURIComponent(id)}`;
+    const [audit, deliveries] = await Promise.all([
+        api(`audit?conversation_id=${encodeURIComponent(id)}&limit=500`),
+        api(`deliveries?conversation_id=${encodeURIComponent(id)}&limit=500`),
+    ]);
     document.title = `${c.subject || "Conversation"} – Ticket Bridge`;
 
     const deliveriesById = new Map((deliveries.data?.items ?? []).map((d) => [d.id, d]));
@@ -746,7 +750,8 @@ async function renderConversation(id) {
             <div class="conversation-tags">
                 <span class="pill pill-blue">${icon("i-tag")}${escapeHtml(topicName(c.topic_code))}</span>
                 ${statusPill(c.overall_status)}
-                <button type="button" class="pill pill-mono" id="btn-copy-conversation-id" title="Copy the full conversation ID">${icon("i-copy")}${escapeHtml(c.conversation_id.slice(0, 8))}</button>
+                <button type="button" class="pill pill-mono" id="btn-copy-conversation-ref" title="Copy the reference">${icon("i-copy")}${escapeHtml(c.conversation_ref)}</button>
+                <button type="button" class="pill pill-mono" id="btn-copy-conversation-id" title="Copy the full conversation ID, which systems use when calling the bridge">${icon("i-copy")}ID ${escapeHtml(c.conversation_id.slice(0, 8))}</button>
             </div>
         </div>
 
@@ -776,6 +781,7 @@ async function renderConversation(id) {
     container.querySelectorAll("[data-retry]").forEach((el) => {
         el.addEventListener("click", () => busy(el, () => retryDeliveries([Number(el.dataset.retry)])));
     });
+    $("btn-copy-conversation-ref").addEventListener("click", () => copyText(c.conversation_ref, "Reference copied"));
     $("btn-copy-conversation-id").addEventListener("click", () => copyText(c.conversation_id, "Conversation ID copied"));
 }
 
@@ -1011,9 +1017,9 @@ function openDeliverySheet(d) {
             <div class="list">
                 <div class="row kv-row"><span class="kv-label">From</span><span class="kv-value">${escapeHtml(systemName(d.source))}</span></div>
                 <div class="row kv-row"><span class="kv-label">To</span><span class="kv-value">${escapeHtml(systemName(d.destination))}</span></div>
-                <a class="row kv-row" href="#/conversations/${encodeURIComponent(d.conversation_id)}" data-close>
+                <a class="row kv-row" href="#/conversations/${encodeURIComponent(d.conversation_ref)}" data-close>
                     <span class="kv-label">Conversation</span>
-                    <span class="row-trailing"><span class="kv-value">${escapeHtml(d.conversation_subject || "Untitled conversation")}</span>${CHEVRON}</span>
+                    <span class="row-trailing"><span class="kv-value">${escapeHtml(d.conversation_ref)} – ${escapeHtml(d.conversation_subject || "Untitled conversation")}</span>${CHEVRON}</span>
                 </a>
                 <div class="row kv-row"><span class="kv-label">Type</span><span class="kv-value">${escapeHtml(d.event === "ticket.created" ? "New ticket for them" : `Update to their ticket ${d.payload?.external_ref ?? ""}`)}</span></div>
                 <div class="row kv-row"><span class="kv-label">Queued</span><span class="kv-value">${escapeHtml(formatDateTime(d.created_at))}</span></div>
@@ -1548,7 +1554,7 @@ async function renderActivity() {
     chip.hidden = !conversation;
     if (conversation) {
         const c = await api(`conversations/${encodeURIComponent(conversation)}`);
-        $("activity-conversation-label").textContent = `Conversation: ${c.data?.subject || conversation.slice(0, 8)}`;
+        $("activity-conversation-label").textContent = `Conversation: ${c.data?.subject || c.data?.conversation_ref || conversation.slice(0, 8)}`;
     }
     activityState.items = [];
     activityState.offset = 0;

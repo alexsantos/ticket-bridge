@@ -21,6 +21,7 @@ def test_ticket_created_has_no_external_ref():
     payload = build_outbound_payload(
         is_known_participant=False,
         conversation_id=CONVERSATION_ID,
+        conversation_ref="INFRA-1",
         status=CanonicalStatus.NEW,
         source_system="system_a",
         source_ref="TICKET-1001",
@@ -36,6 +37,7 @@ def test_ticket_updated_has_external_ref():
     payload = build_outbound_payload(
         is_known_participant=True,
         conversation_id=CONVERSATION_ID,
+        conversation_ref="INFRA-1",
         status=CanonicalStatus.IN_PROGRESS,
         source_system="system_a",
         source_ref="TICKET-1001",
@@ -51,6 +53,7 @@ def test_metadata_is_forwarded_as_is():
     payload = build_outbound_payload(
         is_known_participant=True,
         conversation_id=CONVERSATION_ID,
+        conversation_ref="INFRA-1",
         status=CanonicalStatus.RESOLVED,
         source_system="system_b",
         source_ref="INSVER-8842",

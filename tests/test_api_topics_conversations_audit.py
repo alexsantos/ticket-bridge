@@ -60,6 +60,17 @@ async def test_conversation_detail(admin):
     assert (await admin.get("/api/v1/conversations/00000000-0000-0000-0000-000000000000")).status_code == 404
 
 
+async def test_conversation_lookup_by_ref(admin):
+    infra_id, _ = await _two_conversations(admin)
+    listed = {c["conversation_id"]: c["conversation_ref"] for c in (await admin.get("/api/v1/conversations")).json()}
+    ref = listed[infra_id]
+    assert ref.startswith("INFRA-")
+
+    c = (await admin.get(f"/api/v1/conversations/{ref}")).json()
+    assert c["conversation_id"] == infra_id and c["conversation_ref"] == ref
+    assert (await admin.get("/api/v1/conversations/INFRA-999999")).status_code == 404
+
+
 async def test_audit_paging_and_filters(admin):
     infra_id, _ = await _two_conversations(admin)
 
